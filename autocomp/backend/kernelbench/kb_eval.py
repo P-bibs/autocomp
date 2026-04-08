@@ -8,20 +8,70 @@ from datetime import datetime
 
 from autocomp.common import logger, SOLS_DIR
 from autocomp.search.prob import Prob
+from autocomp.search.code_repo import CodeCandidate
 from autocomp.backend.eval_backend import EvalBackend
 
-KERNELBENCH_DIR = pathlib.Path("/scratch/charleshong/kernelbench/KernelBench")
+KERNELBENCH_DIR = pathlib.Path("/home/paulbib/Development/KernelBench")
 
 class KBEvalBackend(EvalBackend):
     def get_backend_specific_rules(self) -> list[str]:
         return [
             "All generated code should be contained in a single Python file (inline CUDA code is allowed).",
-            "When using torch.utils.cpp_extension load() or load_inline(), make sure to place C++ code in cpp_sources and CUDA code in cuda_sources.",
+            r'''
+You can use the following Python code to build a CUDA extension for Torch:
+```python
+from torch.utils.cpp_extension import load_inline
+cuda_kernel = r"""
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
+__global__ void fused_op_forward_kernel(...) {
+    ...
+}
+
+void fused_op_forward(int blocks, int threads, ...) {
+    fused_op_forward_kernel<<<blocks, threads>>>(...);
+}
+"""
+
+# --- C++ Logic (Interface/Bindings) ---
+cpp_source = r"""
+#include <torch/extension.h>
+
+// Forward declaration of the function in the .cu file
+void fused_op_forward(...);
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("fused_op", &fused_op_forward, "<docstring goes here>");
+}
+"""
+
+# Compile the extension
+fused_ext = load_inline(
+    name='fused_op',
+    cpp_sources=cpp_source,
+    cuda_sources=cuda_kernel,
+    extra_cuda_cflags=['-O3', '--use_fast_math'],
+    with_cuda=True
+)
+
+fused_ext.fused_op(...)
+```
+''',
+            # "When using torch.utils.cpp_extension load() or load_inline(), make sure to place C++ code in cpp_sources and CUDA code in cuda_sources.",
             "Do not use the `function` argument of load_inline(), make a PYBIND11 binding instead.",
+            # "Don't do any work in the non-device CUDA and C++ code. All work (including grid/block size selection and tensor allocation) should be done in the Python code. The arguments passed to the inline module should be directly passed through to the CUDA kernel without modification.",
+            "You are not allowed to precompute any data in the __init__ function",
             "Only class ModelNew will be imported during evaluation. Feel free to define other variables, functions, or classes, but make sure they are used by ModelNew.",
         ]
 
-    def evaluate_code(self, prob: Prob, code_strs: list[str], simulator: str) -> List[dict]:
+    def evaluate_code(
+        self,
+        prob: Prob,
+        code_strs: list[str],
+        simulator: str,
+        candidates: list[CodeCandidate] | None = None,
+    ) -> List[dict]:
         level_str = prob.prob_type.split("-")[1]
         ref_file = glob.glob(f"{KERNELBENCH_DIR}/KernelBench/{level_str}/{prob.prob_id}_*.py")[0]
         results = []
@@ -33,7 +83,9 @@ class KBEvalBackend(EvalBackend):
             test_file.write_text(code_str)
 
             cmd = [
-                "python", 
+                "uv",
+                "run",
+                "python",
                 "scripts/run_and_check.py", 
                 "ref_origin=local",
                 f"ref_arch_src_path={str(ref_file)}",
@@ -41,6 +93,7 @@ class KBEvalBackend(EvalBackend):
                 f"level={level_str[-1]}",
                 f"problem_id={prob.prob_id}",
                 "timeout=10",
+                "check_kernel=False",
             ]
             logger.info(f"Running command: {' '.join(cmd)} from cwd {KERNELBENCH_DIR}")
             try:
@@ -57,7 +110,18 @@ class KBEvalBackend(EvalBackend):
                 results.append({"correct": False})
             else:
                 latency = float(stdout.split(" runtime_stats={'mean': ")[-1].split(",")[0])
-                logger.info(f"Kernel passed correctness for code {i}, latency: {latency}")
+                plan_model = None
+                code_model = None
+                if candidates is not None and i < len(candidates):
+                    plan_model = candidates[i].plan_gen_model
+                    code_model = candidates[i].code_gen_model
+                logger.info(
+                    "Kernel passed correctness for code %d, plan_model: %s, code_model: %s, latency: %s",
+                    i,
+                    plan_model or "unknown",
+                    code_model or "unknown",
+                    latency,
+                )
                 results.append({"correct": True, "latency": latency})
         return results
 

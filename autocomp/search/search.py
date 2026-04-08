@@ -417,7 +417,10 @@ class SearchStrategy:
                     per_cand_stats.append(json.load(f))
         else:
             per_cand_stats = self.eval_backend.evaluate_code(
-                self.prob, [candidate.code for candidate in candidates], self.simulator
+                self.prob,
+                [candidate.code for candidate in candidates],
+                self.simulator,
+                candidates=candidates,
             )
 
             # Save stats

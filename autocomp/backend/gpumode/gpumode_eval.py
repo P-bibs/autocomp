@@ -9,6 +9,7 @@ import sys
 
 from autocomp.common import logger
 from autocomp.search.prob import Prob
+from autocomp.search.code_repo import CodeCandidate
 from autocomp.backend.eval_backend import EvalBackend
 
 GPUMODE_DIR = pathlib.Path("/scratch/charleshong/cuda-opt/reference-kernels/problems")
@@ -28,7 +29,14 @@ class GpuModeEvalBackend(EvalBackend):
             "Keep the same function name and signature as the original program for custom_kernel() (helper functions can be renamed, deleted, etc.).",
         ]
 
-    def evaluate_code(self, prob: Prob, code_strs: list[str], simulator: str, benchmark_num: int = None) -> List[dict]:
+    def evaluate_code(
+        self,
+        prob: Prob,
+        code_strs: list[str],
+        simulator: str,
+        benchmark_num: int = None,
+        candidates: list[CodeCandidate] | None = None,
+    ) -> List[dict]:
         """
         simulator: "gpumode" or "gpumode-cli"
         """
@@ -183,7 +191,18 @@ class GpuModeEvalBackend(EvalBackend):
 
             latency = round(math.prod(test_latencies) ** (1/len(test_latencies)), 3)  # geomean
             results.append({"correct": True, "latency": latency, "stdout": stdout_output})
-            logger.info(f"Kernel passed correctness for code {i}, latency: {latency}")
+            plan_model = None
+            code_model = None
+            if candidates is not None and i < len(candidates):
+                plan_model = candidates[i].plan_gen_model
+                code_model = candidates[i].code_gen_model
+            logger.info(
+                "Kernel passed correctness for code %d, plan_model: %s, code_model: %s, latency: %s",
+                i,
+                plan_model or "unknown",
+                code_model or "unknown",
+                latency,
+            )
         return results
 
 if __name__ == "__main__":

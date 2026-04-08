@@ -1,12 +1,19 @@
 from typing import List
 
 from autocomp.search.prob import Prob
+from autocomp.search.code_repo import CodeCandidate
 
 class EvalBackend:
     def __init__(self):
         pass
 
-    def evaluate_code(self, prob: Prob, code_strs: list[str], simulator: str) -> List[dict]:
+    def evaluate_code(
+        self,
+        prob: Prob,
+        code_strs: list[str],
+        simulator: str,
+        candidates: list[CodeCandidate] | None = None,
+    ) -> List[dict]:
         pass
 
     def get_hw_feedback(self, prob: Prob, code_strs: list[str]) -> list[list[str]]:

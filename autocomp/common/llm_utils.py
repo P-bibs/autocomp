@@ -570,7 +570,7 @@ async def fetch_tool_completion(
                 elif provider == "aws-bedrock":
                     system, br_messages = _messages_for_bedrock(messages)
                     kwargs = {
-                        "modelId": model,
+                        "modelId": model.replace("_", "/"),
                         "messages": br_messages,
                         "inferenceConfig": {},
                     }
@@ -627,6 +627,7 @@ async def fetch_tool_completion(
                 temperature = None
                 continue
             logger.info(f"fetch_tool_completion error (attempt {attempt + 1}): {e}")
+            logger.info(f"Model name: {model}")
             wait_time = 2**attempt + random.uniform(0, 1)
             logger.info(f"Retrying in {wait_time:.2f}s...")
             await asyncio.sleep(wait_time)
@@ -683,7 +684,7 @@ class LLMClient:
                 bedrock_kwargs["aws_secret_key"] = aws_secret_key
             self.client = anthropic.AnthropicBedrock(**bedrock_kwargs)
             self.async_client = anthropic.AsyncAnthropicBedrock(**bedrock_kwargs)
-        elif self.provider == "aws":
+        elif self.provider == "aws" or "arn:aws:bedrock" in model:
             # Generic Bedrock models (Llama, Mistral, Nova, etc.) via Converse API
             # Use explicit keys if provided, otherwise IAM role
             from botocore.config import Config as BotoConfig
@@ -729,7 +730,7 @@ class LLMClient:
         return self._loop.run_until_complete(coro)
 
     def web_search(self, query: str) -> str:
-        messages = [{"role": "user", "content": query}]
+        messages = [{"rolemodel": "user", "content": query}]
         tools = [{"type": "web_search_preview"}]
         result = self.chat_messages(messages, tools=tools)
         return result.get("content") or ""
