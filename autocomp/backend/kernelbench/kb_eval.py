@@ -1,6 +1,7 @@
 import pathlib
 import glob
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 import os
 import shutil
@@ -12,6 +13,35 @@ from autocomp.search.code_repo import CodeCandidate
 from autocomp.backend.eval_backend import EvalBackend
 
 KERNELBENCH_DIR = pathlib.Path("/home/paulbib/Development/KernelBench")
+
+
+def _discover_cuda_devices() -> list[str]:
+    """Return visible CUDA device ids for parallel candidate evaluation."""
+    configured = os.environ.get("AUTOCOMP_CUDA_DEVICES")
+    if configured:
+        return [device.strip() for device in configured.split(",") if device.strip()]
+
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible:
+        return [device.strip() for device in visible.split(",") if device.strip()]
+
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index",
+                "--format=csv,noheader",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return ["0"]
+
+    devices = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return devices or ["0"]
 
 class KBEvalBackend(EvalBackend):
     def get_backend_specific_rules(self) -> list[str]:
@@ -74,13 +104,16 @@ fused_ext.fused_op(...)
     ) -> List[dict]:
         level_str = prob.prob_type.split("-")[1]
         ref_file = glob.glob(f"{KERNELBENCH_DIR}/KernelBench/{level_str}/{prob.prob_id}_*.py")[0]
-        results = []
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         tmp_dir = pathlib.Path(__file__).parent / "tmp_files" / f"kb_eval_{timestamp}"
         tmp_dir.mkdir(parents=True, exist_ok=True)
-        for i, code_str in enumerate(code_strs):
+        cuda_devices = _discover_cuda_devices()
+        max_parallel = min(len(code_strs), len(cuda_devices)) if code_strs else 1
+
+        def _evaluate_single(i: int, code_str: str) -> dict:
             test_file = tmp_dir / f"code_{i}.py"
             test_file.write_text(code_str)
+            assigned_device = cuda_devices[i % len(cuda_devices)]
 
             cmd = [
                 "uv",
@@ -95,19 +128,34 @@ fused_ext.fused_op(...)
                 "timeout=10",
                 "check_kernel=False",
             ]
-            logger.info(f"Running command: {' '.join(cmd)} from cwd {KERNELBENCH_DIR}")
+            child_env = os.environ.copy()
+            child_env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+            child_env["CUDA_VISIBLE_DEVICES"] = assigned_device
+            logger.info(
+                "Running command on GPU %s: %s from cwd %s",
+                assigned_device,
+                " ".join(cmd),
+                KERNELBENCH_DIR,
+            )
             try:
-                result = subprocess.run(cmd, cwd=KERNELBENCH_DIR, check=False, capture_output=True, text=True, timeout=240)
+                result = subprocess.run(
+                    cmd,
+                    cwd=KERNELBENCH_DIR,
+                    env=child_env,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=240,
+                )
             except Exception as e:
                 logger.info(f"Error running command: {e}")
-                results.append({"correct": False})
-                continue
+                return {"correct": False}
             stdout = result.stdout
             output_file = tmp_dir / f"output_{i}.txt"
             output_file.write_text(stdout)
             if " runtime_stats={'mean':" not in stdout:
                 logger.info(f"Kernel did not pass correctness for code {i}")
-                results.append({"correct": False})
+                return {"correct": False}
             else:
                 latency = float(stdout.split(" runtime_stats={'mean': ")[-1].split(",")[0])
                 plan_model = None
@@ -122,7 +170,26 @@ fused_ext.fused_op(...)
                     code_model or "unknown",
                     latency,
                 )
-                results.append({"correct": True, "latency": latency})
+                return {"correct": True, "latency": latency}
+
+        if max_parallel <= 1:
+            return [_evaluate_single(i, code_str) for i, code_str in enumerate(code_strs)]
+
+        logger.info(
+            "Evaluating %d candidates in parallel across %d GPU(s): %s",
+            len(code_strs),
+            max_parallel,
+            ",".join(cuda_devices[:max_parallel]),
+        )
+        results = [None] * len(code_strs)
+        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            futures = {
+                executor.submit(_evaluate_single, i, code_str): i
+                for i, code_str in enumerate(code_strs)
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                results[idx] = future.result()
         return results
 
 def main():

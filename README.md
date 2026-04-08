@@ -135,6 +135,7 @@ API keys can be configured via environment variables or in `autocomp/common/keys
 | Provider | Environment Variable / Key Name | Provider Name in `run_search.py`
 |----------|--------------------------------|--------------------------------|
 | OpenAI | `OPENAI_API_KEY` | `openai`
+| OpenRouter | `OPENROUTER_API_KEY` | `openrouter`
 | Anthropic | `ANTHROPIC_API_KEY` | `anthropic`
 | Together | `TOGETHER_API_KEY` | `together`
 | AWS Bedrock | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | `aws`
@@ -145,6 +146,7 @@ API keys can be configured via environment variables or in `autocomp/common/keys
 
 ```python
 OPENAI_API_KEY = "sk-..."
+OPENROUTER_API_KEY = "sk-or-..."
 ANTHROPIC_API_KEY = "sk-ant-..."
 TOGETHER_API_KEY = "..."
 AWS_ACCESS_KEY_ID = "AKIA..."
@@ -176,6 +178,17 @@ models = [
 ```
 
 By default the `us-west-2` region is used. Set the `AWS_REGION` environment variable (or add it to `keys.py`) to override.
+
+#### OpenRouter
+
+OpenRouter is supported via its OpenAI-compatible chat completions API. Set `OPENROUTER_API_KEY` and use `openrouter::<model_id>` when configuring models:
+
+```python
+models = [
+    "openrouter::anthropic/claude-sonnet-4",
+    "openrouter::openai/gpt-5-mini",
+]
+```
 
 ## 🚀 Usage
 
@@ -213,7 +226,7 @@ The most important parameters are:
 - `agent_name`: The optimization agent to use. See the [table above](#hardware-targets) for the right agent for each target.
 
 **Models**
-- `models`: The list of models to use. Models are specified `"<provider>::<model>"`, for example `"openai::gpt-5.2"` or `"gcp::gemini-3-pro-preview"`. Currently supported endpoint providers are OpenAI (`openai`), Google Vertex AI (`gcp`), Anthropic (`anthropic`), AWS Bedrock (`aws`), and Together (`together`). Use provider `vllm` for local serving.
+- `models`: The list of models to use. Models are specified `"<provider>::<model>"`, for example `"openai::gpt-5.2"` or `"gcp::gemini-3-pro-preview"`. Currently supported endpoint providers are OpenAI (`openai`), OpenRouter (`openrouter`), Google Vertex AI (`gcp`), Anthropic (`anthropic`), AWS Bedrock (`aws`), and Together (`together`). Use provider `vllm` for local serving.
 - `code_models`: The list of models to use for the implementation phase, if you would like to use a distinct set of models from planning. Can be set to `None` to use the same set of models.
 
 **Search**

@@ -9,7 +9,13 @@ from autocomp.search.prob import Prob
 class DummyEvalBackend(EvalBackend):
     """Eval backend that always reports correct with a fixed latency."""
 
-    def evaluate_code(self, prob: Prob, code_strs: list[str], simulator: str) -> list[dict]:
+    def evaluate_code(
+        self,
+        prob: Prob,
+        code_strs: list[str],
+        simulator: str,
+        candidates=None,
+    ) -> list[dict]:
         return [{"correct": True, "p99_latency": 1.0} for _ in code_strs]
 
 

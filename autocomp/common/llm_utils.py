@@ -34,6 +34,7 @@ def _get_key(env_var: str, default: str = "EMPTY"):
 
 
 openai_key_str = _get_key("OPENAI_API_KEY")
+openrouter_key_str = _get_key("OPENROUTER_API_KEY", default=None)
 anthropic_key_str = _get_key("ANTHROPIC_API_KEY")
 together_key_str = _get_key("TOGETHER_API_KEY")
 aws_access_key = _get_key("AWS_ACCESS_KEY_ID", default=None)
@@ -47,6 +48,7 @@ vllm_api_base = _get_key("VLLM_API_BASE", default="http://localhost:8000/v1")
 # Log key availability
 _key_status = {
     "OPENAI_API_KEY": openai_key_str not in (None, "EMPTY"),
+    "OPENROUTER_API_KEY": openrouter_key_str is not None,
     "ANTHROPIC_API_KEY": anthropic_key_str not in (None, "EMPTY"),
     "TOGETHER_API_KEY": together_key_str not in (None, "EMPTY"),
     "AWS_ACCESS_KEY_ID": aws_access_key is not None,
@@ -65,6 +67,13 @@ if _unavailable:
 
 def is_openai_reasoning_model(model: str) -> bool:
     return model.startswith(("o1", "o3", "o4", "gpt-5"))
+
+
+def _normalize_provider_model_name(provider: str, model: str) -> str:
+    """Recover slash-delimited model IDs after filesystem-safe sanitization."""
+    if provider in {"aws-bedrock", "openrouter"} and "/" not in model and "_" in model:
+        return model.replace("_", "/")
+    return model
 
 
 ##############################################################################
@@ -439,6 +448,7 @@ async def fetch_tool_completion(
     temperature: float | None = None,
     max_tokens: int | None = None,
     reasoning: dict | None = None,
+    tool_choice: str | dict | None = None,
     bedrock_client=None,
 ) -> dict:
     """Provider-dispatching async helper for chat-completions with tool calling.
@@ -449,9 +459,10 @@ async def fetch_tool_completion(
     for attempt in range(max_retries):
         try:
             async with semaphore:
+                normalized_model = _normalize_provider_model_name(provider, model)
                 if provider == "openai":
                     instructions, input_items = _messages_for_openai_responses(messages)
-                    kwargs = {"model": model, "input": input_items}
+                    kwargs = {"model": normalized_model, "input": input_items}
                     if instructions:
                         kwargs["instructions"] = instructions
                     if max_tokens is not None:
@@ -471,6 +482,8 @@ async def fetch_tool_completion(
                             }
 
                         kwargs["tools"] = [_conv(t) for t in tools]
+                    if tool_choice is not None:
+                        kwargs["tool_choice"] = tool_choice
                     if temperature is not None:
                         kwargs["temperature"] = temperature
                     if reasoning:
@@ -488,12 +501,14 @@ async def fetch_tool_completion(
                     resp = await client.responses.create(**kwargs)
                     return _normalize_openai_responses_response(resp)
 
-                elif provider in ("vllm", "together"):
-                    kwargs = {"model": model, "messages": messages}
+                elif provider in ("vllm", "together", "openrouter"):
+                    kwargs = {"model": normalized_model, "messages": messages}
                     if max_tokens is not None:
                         kwargs["max_tokens"] = max_tokens
                     if tools:
                         kwargs["tools"] = _openai_tools_from_schema(tools)
+                    if tool_choice is not None:
+                        kwargs["tool_choice"] = tool_choice
                     if temperature is not None:
                         kwargs["temperature"] = temperature
                     if response_format:
@@ -504,7 +519,7 @@ async def fetch_tool_completion(
                 elif provider in ("anthropic", "aws"):
                     system, anth_messages = _messages_for_anthropic(messages)
                     kwargs = {
-                        "model": model,
+                        "model": normalized_model,
                         "messages": anth_messages,
                         "max_tokens": max_tokens or 16384,
                     }
@@ -561,7 +576,7 @@ async def fetch_tool_completion(
                         if schema_body:
                             config.response_schema = schema_body
                     resp = await client.aio.models.generate_content(
-                        model=model,
+                        model=normalized_model,
                         contents=contents,
                         config=config,
                     )
@@ -570,7 +585,7 @@ async def fetch_tool_completion(
                 elif provider == "aws-bedrock":
                     system, br_messages = _messages_for_bedrock(messages)
                     kwargs = {
-                        "modelId": model.replace("_", "/"),
+                        "modelId": normalized_model,
                         "messages": br_messages,
                         "inferenceConfig": {},
                     }
@@ -663,6 +678,16 @@ class LLMClient:
         if self.provider == "openai":
             self.client = OpenAI(api_key=openai_key_str)
             self.async_client = AsyncOpenAI(api_key=openai_key_str)
+        elif self.provider == "openrouter":
+            openrouter_api_base = "https://openrouter.ai/api/v1"
+            self.client = OpenAI(
+                api_key=openrouter_key_str,
+                base_url=openrouter_api_base,
+            )
+            self.async_client = AsyncOpenAI(
+                api_key=openrouter_key_str,
+                base_url=openrouter_api_base,
+            )
         elif self.provider == "gcp":
             if google_api_key and not google_cloud_project:
                 self.client = genai.Client(api_key=google_api_key)
@@ -777,6 +802,7 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         reasoning: dict | None = None,
+        tool_choice: str | dict | None = None,
     ) -> dict:
         """Single LLM call with message array, optional tool schemas, optional structured output.
         Returns normalized dict: {"role": "assistant", "content": ..., "tool_calls": [...]}."""
@@ -794,6 +820,7 @@ class LLMClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 reasoning=reasoning,
+                tool_choice=tool_choice,
                 bedrock_client=bedrock,
             )
         )
@@ -807,6 +834,7 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         reasoning: dict | None = None,
+        tool_choice: str | dict | None = None,
     ) -> list[list[dict]]:
         """Batched async version of chat_messages.
 
@@ -842,6 +870,7 @@ class LLMClient:
                             temperature=temperature,
                             max_tokens=max_tokens,
                             reasoning=reasoning,
+                            tool_choice=tool_choice,
                             bedrock_client=bedrock,
                         )
                     )
