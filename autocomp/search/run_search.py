@@ -28,26 +28,39 @@ def main():
     # ------------------------------------------------------------------
     # Target & environment
     # ------------------------------------------------------------------
-    backend_name = "trn"            # "gemmini", "trn", "tpu", "jaxbench", "kernelbench", "gpumode"
-    agent_name = "built:trn2-nki2"   # "gemmini", "trn", "cuda", "built:<name>", or path
+    backend_name = "kernelbench"            # "gemmini", "trn", "tpu", "jaxbench", "kernelbench", "gpumode"
+    agent_name = "cuda"   # "gemmini", "trn", "cuda", "built:<name>", or path
     simulator = None                # "firesim"/"spike" for gemmini; "gpumode-local"/"gpumode-cli" for gpumode
-    hw_config = TrnHardwareConfig("trn1.2xlarge")
+    hw_config = CudaHardwareConfig("NVIDIA RTX 2080Ti", "2.10.0", "12.5")
     # hw_config = GemminiHardwareConfig(pe_dim=16, spad_size_kb=256, acc_size_kb=64)
-    # hw_config = CudaHardwareConfig("NVIDIA L40S", "2.5.0", "12.4")
+    # hw_config = TrnHardwareConfig("trn1.2xlarge")
     # hw_config = TpuHardwareConfig("v6e-1")
 
-    prob_type = "trn-tutorial-nki2"      # see README.md or sols/ for available problems
-    prob_id = 2
+    prob_type = "kb-level2"      # see README.md or sols/ for available problems
+    prob_id = 51
 
     # ------------------------------------------------------------------
     # Models
     # ------------------------------------------------------------------
-    # Format: "provider::model" (openai, anthropic, together, aws, gcp, vllm)
+    # Format: "provider::model" (openai, openrouter, anthropic, together, aws, gcp, vllm)
     models = [
-        "aws::us.anthropic.claude-opus-4-5-20251101-v1:0",
-        "aws::zai.glm-5",
-        "aws::minimax.minimax-m2.5",
-        "aws::moonshotai.kimi-k2.5",
+        # "aws::us.anthropic.claude-opus-4-5-20251101-v1:0",
+        # "aws::us.amazon.nova-2-lite-v1:0",
+        # "openrouter::anthropic/claude-sonnet-4",
+
+        # "aws::openai.gpt-oss-safeguard-120b",
+        # "aws::arn:aws:bedrock:us-east-2:955775176097:inference-profile/us.amazon.nova-premier-v1:0",
+        # "aws::qwen.qwen3-next-80b-a3b",
+
+        "openrouter::qwen/qwen3-coder@preset/paulbib",
+        "openrouter::google/gemini-3.1-flash-lite-preview@preset/paulbib",
+        "openrouter::openai/gpt-oss-120b@preset/paulbib",
+        "openrouter::minimax/minimax-m2.5@preset/paulbib",
+
+        # "aws::us.amazon.nova-pro-v1:0",
+        # "aws::zai.glm-5",
+        # "aws::minimax.minimax-m2.5",
+        # "aws::moonshotai.kimi-k2.5",
     ]
     code_models = None  # None = same as planning models
 
@@ -60,7 +73,7 @@ def main():
     num_plan_candidates = 4
     num_code_candidates = 2
     beam_size = 4
-    dropout_menu_options = 0.25
+    dropout_menu_options = 0.4
     early_stop_iters = 0            # 0 = disabled
     early_stop_threshold = 1.0
     resume_from = ""
