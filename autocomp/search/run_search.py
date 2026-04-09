@@ -36,8 +36,16 @@ def main():
     # hw_config = TrnHardwareConfig("trn1.2xlarge")
     # hw_config = TpuHardwareConfig("v6e-1")
 
-    prob_type = "kb-level1"      # see README.md or sols/ for available problems
-    prob_id = 9
+    prob_type = "kb-level2"      # see README.md or sols/ for available problems
+    
+    # parse prob_id with an argparser
+    # prob_id = 76
+
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prob-id", type=int, required=True, help="Problem ID to solve")
+    args = parser.parse_args()
+    prob_id = args.prob_id
     
     # ------------------------------------------------------------------
     # Models
