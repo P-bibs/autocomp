@@ -1,0 +1,263 @@
+# Original path: /home/paulbib/Development/autocomp/autocomp/backend/kernelbench/tmp_files/kb_eval_20260409_091623/code_4.py
+import torch
+import torch.nn as nn
+INIT_PARAM_NAMES = ['in_channels', 'out_channels', 'kernel_size']
+FORWARD_ARG_NAMES = ['x']
+FORWARD_FREE_VARS = []
+REQUIRED_STATE_NAMES = ['conv_weight', 'conv_bias', 'conv_stride', 'conv_padding', 'conv_dilation', 'conv_groups']
+REQUIRED_FLAT_STATE_NAMES = ['conv_weight', 'conv_bias']
+
+
+class ModelNew(nn.Module):
+    """
+    ModelNew that performs a convolution, applies minimum operation, Tanh, and another Tanh.
+    """
+
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super(ModelNew, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size)
+
+    def forward(self, *args) -> torch.Tensor:
+        return functional_model(*args, **extract_state_kwargs(self))
+
+
+def build_reference_model():
+    init_inputs = list(get_init_inputs())
+    model = ModelNew(*init_inputs)
+    model.eval()
+    return model
+
+
+def extract_state_kwargs(model):
+    flat_state = {}
+    for name, value in model.named_parameters():
+        flat_state[name.replace('.', '_')] = value
+    for name, value in model.named_buffers():
+        flat_state[name.replace('.', '_')] = value
+    state_kwargs = {}
+    init_inputs = list(get_init_inputs())
+    init_arg_map = {name: value for name, value in zip(INIT_PARAM_NAMES, init_inputs)}
+    # State for conv (nn.Conv2d)
+    if 'conv_weight' in flat_state:
+        state_kwargs['conv_weight'] = flat_state['conv_weight']
+    else:
+        state_kwargs['conv_weight'] = getattr(model.conv, 'weight', None)
+    if 'conv_bias' in flat_state:
+        state_kwargs['conv_bias'] = flat_state['conv_bias']
+    else:
+        state_kwargs['conv_bias'] = getattr(model.conv, 'bias', None)
+    state_kwargs['conv_stride'] = model.conv.stride
+    state_kwargs['conv_padding'] = model.conv.padding
+    state_kwargs['conv_dilation'] = model.conv.dilation
+    state_kwargs['conv_groups'] = model.conv.groups
+    missing = [name for name in REQUIRED_STATE_NAMES if name not in state_kwargs]
+    if missing:
+        raise RuntimeError(f'Missing required state entries: {missing}')
+    return state_kwargs
+
+
+def get_functional_inputs():
+    model = build_reference_model()
+    forward_args = tuple(get_inputs())
+    state_kwargs = extract_state_kwargs(model)
+    return forward_args, state_kwargs
+
+
+
+
+import torch
+from torch.utils.cpp_extension import load_inline
+
+# ============================================================================
+# CUDA Kernel: Fused Conv2D + ChannelMin + DoubleTanh
+# ============================================================================
+
+cuda_source = r"""
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+#include <math.h>
+
+__global__ void fused_conv_min_tanh_kernel(
+    const float* __restrict__ x,
+    const float* __restrict__ weight,
+    const float* __restrict__ bias,
+    float* __restrict__ output,
+    int N, int C_in, int C_out, int H, int W, int K,
+    int stride, int padding) {
+
+    int OH = (H + 2 * padding - K) / stride + 1;
+    int OW = (W + 2 * padding - K) / stride + 1;
+
+    // Global thread index maps to output spatial positions
+    // Thread block processes one (n, oh, ow) location
+    int oh = blockIdx.y * blockDim.y + threadIdx.y;
+    int ow = blockIdx.x * blockDim.x + threadIdx.x;
+    int n = blockIdx.z;
+
+    if (oh >= OH || ow >= OW) return;
+
+    // Compute convolution across all input channels
+    // Store per-channel results to find minimum
+    float min_val = 1e9f;  // Large initial value for min
+
+    for (int co = 0; co < C_out; ++co) {
+        float conv_out = bias[co];
+
+        // Spatial convolution loop - coalesced weight access
+        for (int ci = 0; ci < C_in; ++ci) {
+            for (int kh = 0; kh < K; ++kh) {
+                for (int kw = 0; kw < K; ++kw) {
+                    int ih = oh * stride + kh - padding;
+                    int iw = ow * stride + kw - padding;
+
+                    // Boundary check
+                    if (ih >= 0 && ih < H && iw >= 0 && iw < W) {
+                        // Coalesced read from input: sequential elements in memory
+                        float x_val = x[((n * C_in + ci) * H + ih) * W + iw];
+                        // Weight read (read-only, benefits from cache)
+                        float w_val = weight[(((co * C_in + ci) * K + kh) * K + kw)];
+                        conv_out += x_val * w_val;
+                    }
+                }
+            }
+        }
+
+        // Track minimum across output channels
+        min_val = fminf(min_val, conv_out);
+    }
+
+    // Apply double tanh activation to the minimum value
+    // tanh is approximated efficiently with --use_fast_math
+    float tanh_once = tanhf(min_val);
+    float tanh_twice = tanhf(tanh_once);
+
+    // Write fused result to output
+    // Single coalesced write per thread
+    int out_idx = ((n * 1 * OH) + oh) * OW + ow;  // Output: [N, 1, OH, OW]
+    output[out_idx] = tanh_twice;
+}
+
+void fused_conv_min_tanh(
+    torch::Tensor x,
+    torch::Tensor weight,
+    torch::Tensor bias,
+    torch::Tensor output,
+    int N, int C_in, int C_out, int H, int W, int K,
+    int stride, int padding) {
+
+    int OH = (H + 2 * padding - K) / stride + 1;
+    int OW = (W + 2 * padding - K) / stride + 1;
+
+    // Optimize block dimensions for RTX 2080Ti
+    // 16x16 = 256 threads per block (good occupancy, register pressure managed)
+    dim3 blocks(
+        (OW + 15) / 16,      // Grid X: OW spatial positions
+        (OH + 15) / 16,      // Grid Y: OH spatial positions
+        N                      // Grid Z: batch dimension
+    );
+    dim3 threads(16, 16, 1);
+
+    fused_conv_min_tanh_kernel<<<blocks, threads>>>(
+        x.data_ptr<float>(),
+        weight.data_ptr<float>(),
+        bias.data_ptr<float>(),
+        output.data_ptr<float>(),
+        N, C_in, C_out, H, W, K,
+        stride, padding);
+
+    cudaDeviceSynchronize();
+}
+"""
+
+cpp_source = r"""
+#include <torch/extension.h>
+
+void fused_conv_min_tanh(
+    torch::Tensor x,
+    torch::Tensor weight,
+    torch::Tensor bias,
+    torch::Tensor output,
+    int N, int C_in, int C_out, int H, int W, int K,
+    int stride, int padding);
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("fused_conv_min_tanh", &fused_conv_min_tanh,
+          "Fused Conv2D + ChannelMin + DoubleTanh kernel");
+}
+"""
+
+# Compile the extension with optimization flags
+fused_ext = load_inline(
+    name='fused_conv_min_tanh_ext',
+    cpp_sources=cpp_source,
+    cuda_sources=cuda_source,
+    extra_cuda_cflags=['-O3', '--use_fast_math'],
+    with_cuda=True
+)
+
+# ============================================================================
+# Optimized functional_model
+# ============================================================================
+
+def functional_model(
+    x,
+    *,
+    conv_weight,
+    conv_bias,
+    conv_stride,
+    conv_padding,
+    conv_dilation,
+    conv_groups,
+):
+    """
+    Fused Conv2D + Channel-wise Min + Double Tanh activation.
+    
+    Replaces:
+      1. conv2d() kernel launch
+      2. min(dim=1) kernel launch
+      3. tanh() kernel launch (first)
+      4. tanh() kernel launch (second)
+    
+    With a single unified CUDA kernel that keeps all intermediate
+    results in registers, eliminating global memory round-trips.
+    """
+    assert conv_groups == 1, "Only single-group convolution supported"
+    assert conv_dilation == 1, "Dilation not supported in fused kernel"
+    
+    N, C_in, H, W = x.shape
+    C_out, _, K, _ = conv_weight.shape
+    
+    # Compute output spatial dimensions
+    OH = (H + 2 * conv_padding - K) // conv_stride + 1
+    OW = (W + 2 * conv_padding - K) // conv_stride + 1
+    
+    # Output tensor: [N, 1, OH, OW] (channel dimension reduced to 1 via min)
+    output = torch.empty(N, 1, OH, OW, dtype=x.dtype, device=x.device)
+    
+    # Launch fused kernel
+    fused_ext.fused_conv_min_tanh(
+        x,
+        conv_weight,
+        conv_bias,
+        output,
+        N, C_in, C_out, H, W, K,
+        conv_stride, conv_padding
+    )
+    
+    return output
+
+# ============================================================================
+# Test parameters
+# ============================================================================
+
+batch_size = 128
+in_channels = 16
+out_channels = 64
+height = width = 256
+kernel_size = 3
+
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size]
+
+def get_inputs():
+    return [torch.rand(batch_size, in_channels, height, width, device='cuda')]
