@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--prob-type", type=str, default="kb-level2", help="Problem type (e.g. kb-level2)")
     args = parser.parse_args()
     prob_id = args.prob_id
+    prob_type = args.prob_type
     
     # ------------------------------------------------------------------
     # Models
