@@ -1,0 +1,3 @@
+[submodule "KernelBench"]
+	path = KernelBench
+	url = git@github.com:P-bibs/KernelBench.git
