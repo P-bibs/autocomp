@@ -6,10 +6,9 @@ def functional_model(
     x,
     *,
     gemm_weight,
-    gemm_bias,
     bias,
 ):
-    x = F.linear(x, gemm_weight, gemm_bias)
+    x = F.linear(x, gemm_weight, None)
     x = x + bias
     x = torch.relu(x)
     return x
