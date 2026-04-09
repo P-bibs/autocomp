@@ -2,6 +2,7 @@ import pathlib
 import os
 import glob
 import subprocess
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 import os
@@ -43,6 +44,21 @@ def _discover_cuda_devices() -> list[str]:
 
     devices = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     return devices or ["0"]
+
+
+def _parse_kernelbench_result(stdout: str) -> tuple[bool | None, bool | None]:
+    """
+    Extract `(compiled, correctness)` from the KernelBench summary line.
+    """
+    match = re.search(
+        r"\[Eval\]\s+Kernel eval result:\s+compiled=(True|False)\s+correctness=(True|False)",
+        stdout,
+    )
+    if not match:
+        return None, None
+    compiled = match.group(1) == "True"
+    correctness = match.group(2) == "True"
+    return compiled, correctness
 
 class KBEvalBackend(EvalBackend):
     def preprocess_code_for_evaluation(self, prob: Prob, code_str: str) -> str:
@@ -172,17 +188,28 @@ fused_ext.fused_op(...)
                 )
             except Exception as e:
                 logger.info(f"Error running command: {e}")
-                return {"correct": False}
+                return {
+                    "correct": False,
+                    "compiled": None,
+                    "failure_stage": "launcher",
+                }
             stdout = result.stdout
+            stderr = result.stderr
             output_file = tmp_dir / f"output_{i}.txt"
-            output_file.write_text(stdout)
-            if " runtime_stats={'mean':" not in stdout:
-                logger.info(f"Kernel did not pass correctness for code {i}")
-                # print stdout but with tabs prepended
-                for line in stdout.splitlines():
-                    logger.info(f"\t{line}")
-                return {"correct": False}
-            else:
+            output_file.write_text(
+                stdout + ("\n[STDERR]\n" + stderr if stderr else "")
+            )
+
+            compiled, correctness = _parse_kernelbench_result(stdout)
+            stats = {
+                "correct": False,
+                "compiled": compiled,
+                "failure_stage": "unknown",
+                "stdout": stdout,
+                "stderr": stderr,
+            }
+
+            if correctness and " runtime_stats={'mean':" in stdout:
                 latency = float(stdout.split(" runtime_stats={'mean': ")[-1].split(",")[0])
                 plan_model = None
                 code_model = None
@@ -196,7 +223,23 @@ fused_ext.fused_op(...)
                     code_model or "unknown",
                     latency,
                 )
-                return {"correct": True, "latency": latency}
+                stats["correct"] = True
+                stats["latency"] = latency
+                stats["failure_stage"] = None
+                return stats
+
+            if compiled is False:
+                logger.info("Kernel had compilation failure for code %d", i)
+                stats["failure_stage"] = "compilation"
+                return stats
+
+            if correctness is False:
+                logger.info("Kernel did not pass correctness for code %d", i)
+                stats["failure_stage"] = "correctness"
+                return stats
+
+            logger.info("Kernel evaluation failed for code %d", i)
+            return stats
 
         if max_parallel <= 1:
             return [_evaluate_single(i, code_str) for i, code_str in enumerate(code_strs)]
