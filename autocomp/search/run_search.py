@@ -36,9 +36,9 @@ def main():
     # hw_config = TrnHardwareConfig("trn1.2xlarge")
     # hw_config = TpuHardwareConfig("v6e-1")
 
-    prob_type = "kb-level2"      # see README.md or sols/ for available problems
-    prob_id = 51
-
+    prob_type = "kb-level1"      # see README.md or sols/ for available problems
+    prob_id = 9
+    
     # ------------------------------------------------------------------
     # Models
     # ------------------------------------------------------------------

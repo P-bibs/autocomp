@@ -1,4 +1,5 @@
 import pathlib
+import os
 import glob
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,7 +13,7 @@ from autocomp.search.prob import Prob
 from autocomp.search.code_repo import CodeCandidate
 from autocomp.backend.eval_backend import EvalBackend
 
-KERNELBENCH_DIR = pathlib.Path("/home/paulbib/Development/KernelBench")
+KERNELBENCH_DIR = pathlib.Path("./KernelBench")
 
 
 def _discover_cuda_devices() -> list[str]:
@@ -44,8 +45,28 @@ def _discover_cuda_devices() -> list[str]:
     return devices or ["0"]
 
 class KBEvalBackend(EvalBackend):
+    def preprocess_code_for_evaluation(self, prob: Prob, code_str: str) -> str:
+        sol_files_dir = KERNELBENCH_DIR / "KernelBenchFunctional" / prob.prob_type.replace("kb-","")
+        matches = list(sol_files_dir.glob(f"{prob.prob_id}_*.py"))
+        if matches:
+            lines = []
+            # get all lines beween `# BEGIN EVAL UTILS` and `# END EVAL UTILS` in the eval file
+            with open(matches[0], "r") as f:
+                in_utils = False
+                for line in f:
+                    if line.strip() == "# BEGIN EVAL UTILS":
+                        in_utils = True
+                    elif line.strip() == "# END EVAL UTILS":
+                        in_utils = False
+                    elif in_utils:
+                        lines.append(line)
+            utils_code = "".join(lines)
+            return utils_code + "\n\n" + code_str
+        raise ValueError(f"No matching eval utils file found for prob {prob.prob_type} {prob.prob_id} in {sol_files_dir}")
+
     def get_backend_specific_rules(self) -> list[str]:
         return [
+            "You're goal is to optimize the implemention of functional_model, which will be evaluated for correctness and performance.",
             "All generated code should be contained in a single Python file (inline CUDA code is allowed).",
             r'''
 You can use the following Python code to build a CUDA extension for Torch:
@@ -91,8 +112,8 @@ fused_ext.fused_op(...)
             # "When using torch.utils.cpp_extension load() or load_inline(), make sure to place C++ code in cpp_sources and CUDA code in cuda_sources.",
             "Do not use the `function` argument of load_inline(), make a PYBIND11 binding instead.",
             # "Don't do any work in the non-device CUDA and C++ code. All work (including grid/block size selection and tensor allocation) should be done in the Python code. The arguments passed to the inline module should be directly passed through to the CUDA kernel without modification.",
-            "You are not allowed to precompute any data in the __init__ function",
-            "Only class ModelNew will be imported during evaluation. Feel free to define other variables, functions, or classes, but make sure they are used by ModelNew.",
+            "By the time optimization is complete, the code should not use built-in pytorch matmul or convolution functions. Use your own CUDA kernels instead",
+            "Only function functional_model will be imported during evaluation. Feel free to define other variables, functions, or classes, but make sure they are used by functional_model.",
         ]
 
     def evaluate_code(
@@ -104,6 +125,7 @@ fused_ext.fused_op(...)
     ) -> List[dict]:
         level_str = prob.prob_type.split("-")[1]
         ref_file = glob.glob(f"{KERNELBENCH_DIR}/KernelBench/{level_str}/{prob.prob_id}_*.py")[0]
+        ref_file = os.path.abspath(ref_file)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         tmp_dir = pathlib.Path(__file__).parent / "tmp_files" / f"kb_eval_{timestamp}"
         tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -112,7 +134,8 @@ fused_ext.fused_op(...)
 
         def _evaluate_single(i: int, code_str: str) -> dict:
             test_file = tmp_dir / f"code_{i}.py"
-            test_file.write_text(code_str)
+            transformed_code = self.preprocess_code_for_evaluation(prob, code_str)
+            test_file.write_text(transformed_code)
             assigned_device = cuda_devices[i % len(cuda_devices)]
 
             cmd = [
@@ -155,6 +178,9 @@ fused_ext.fused_op(...)
             output_file.write_text(stdout)
             if " runtime_stats={'mean':" not in stdout:
                 logger.info(f"Kernel did not pass correctness for code {i}")
+                # print stdout but with tabs prepended
+                for line in stdout.splitlines():
+                    logger.info(f"\t{line}")
                 return {"correct": False}
             else:
                 latency = float(stdout.split(" runtime_stats={'mean': ")[-1].split(",")[0])

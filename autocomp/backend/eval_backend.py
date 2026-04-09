@@ -3,6 +3,7 @@ from typing import List
 from autocomp.search.prob import Prob
 from autocomp.search.code_repo import CodeCandidate
 
+
 class EvalBackend:
     def __init__(self):
         pass
@@ -23,3 +24,7 @@ class EvalBackend:
     def get_backend_specific_rules(self) -> list[str]:
         """Return backend-specific rule strings for LLM prompts. Default: no rules."""
         return []
+
+    def preprocess_code_for_evaluation(self, prob: Prob, code_str: str) -> str:
+        """Transform candidate code right before evaluation. Default: no-op."""
+        return code_str

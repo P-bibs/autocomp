@@ -108,7 +108,6 @@ class CudaLLMAgent(LLMAgent):
         rules.extend([
             "The rewritten program should be semantically equivalent to the original program, within a small numerical tolerance.",
             "Do not add fallback paths that revert to the original code.",
-            "By the last round of optimization, all PyTorch operations should be converted to CUDA.",
         ])
         if planning:
             rules.append("Limit the scope of the plan to the selected optimization.")

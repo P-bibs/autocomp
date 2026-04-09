@@ -186,6 +186,11 @@ def load_initial_code(backend_name: str, prob: "Prob") -> str:
     prob_type, prob_id = prob.prob_type, prob.prob_id
 
     if backend_name == "kernelbench":
+        sol_dir = SOLS_DIR / prob_type
+        matches = list(sol_dir.glob(f"{prob_id}_*.py"))
+        if matches:
+            with open(matches[0]) as f:
+                return f.read()
         if "kb-" in prob_type:
             level_str = prob_type.split("-")[1]
             kb_level_dir = pathlib.Path(KERNELBENCH_DIR) / "KernelBench" / level_str
