@@ -62,7 +62,7 @@ def main():
 
         "openrouter::qwen/qwen3-coder@preset/paulbib",
         "openrouter::google/gemini-3.1-flash-lite-preview@preset/paulbib",
-        "openrouter::openai/gpt-oss-120b@preset/paulbib",
+        "openrouter::anthropic/claude-haiku-4.5@preset/paulbib",
         "openrouter::minimax/minimax-m2.5@preset/paulbib",
 
         # "aws::us.amazon.nova-pro-v1:0",
