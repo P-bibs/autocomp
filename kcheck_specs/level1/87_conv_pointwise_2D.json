@@ -1,0 +1,28 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 1073741824
+    },
+    "conv1d_weight": {
+      "size": 8192
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 2147483648
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "87_conv_pointwise_2D.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

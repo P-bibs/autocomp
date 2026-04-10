@@ -1,0 +1,25 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2147450880
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 2147450880
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "38_L1Norm_.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

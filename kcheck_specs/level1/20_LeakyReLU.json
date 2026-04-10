@@ -1,0 +1,25 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 1610612736
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 1610612736
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "20_LeakyReLU.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

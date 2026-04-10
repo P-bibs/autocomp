@@ -1,0 +1,25 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 1073741824
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 1073741824
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "89_cumsum.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}
