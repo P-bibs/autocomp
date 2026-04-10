@@ -1,0 +1,187 @@
+# Original path: /home/paulbib/Development/autocomp/autocomp/backend/kernelbench/tmp_files/kb_eval_20260409_155649/code_7.py
+import torch
+import torch.nn as nn
+INIT_PARAM_NAMES = ['in_channels', 'out_channels', 'kernel_size', 'stride', 'padding', 'dilation', 'groups', 'bias']
+FORWARD_ARG_NAMES = ['x']
+FORWARD_FREE_VARS = []
+REQUIRED_STATE_NAMES = ['conv1d_weight', 'conv1d_bias', 'conv1d_stride', 'conv1d_padding', 'conv1d_dilation', 'conv1d_groups']
+REQUIRED_FLAT_STATE_NAMES = ['conv1d_weight', 'conv1d_bias']
+
+
+class ModelNew(nn.Module):
+    """
+    Performs a standard 1D convolution operation.
+
+    Args:
+        in_channels (int): Number of channels in the input tensor.
+        out_channels (int): Number of channels produced by the convolution.
+        kernel_size (int): Size of the convolution kernel.
+        stride (int, optional): Stride of the convolution. Defaults to 1.
+        padding (int, optional): Padding applied to the input. Defaults to 0.
+        dilation (int, optional): Spacing between kernel elements. Defaults to 1.
+        groups (int, optional): Number of blocked connections from input channels to output channels. Defaults to 1.
+        bias (bool, optional): If `True`, adds a learnable bias to the output. Defaults to `False`.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int=1, padding: int=0, dilation: int=1, groups: int=1, bias: bool=False):
+        super(ModelNew, self).__init__()
+        self.conv1d = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+
+    def forward(self, *args) -> torch.Tensor:
+        return functional_model(*args, **extract_state_kwargs(self))
+
+
+def build_reference_model():
+    init_inputs = list(get_init_inputs())
+    model = ModelNew(*init_inputs)
+    model.eval()
+    return model
+
+
+def extract_state_kwargs(model):
+    flat_state = {}
+    for name, value in model.named_parameters():
+        flat_state[name.replace('.', '_')] = value
+    for name, value in model.named_buffers():
+        flat_state[name.replace('.', '_')] = value
+    state_kwargs = {}
+    init_inputs = list(get_init_inputs())
+    init_arg_map = {name: value for name, value in zip(INIT_PARAM_NAMES, init_inputs)}
+    # State for conv1d (nn.Conv1d)
+    if 'conv1d_weight' in flat_state:
+        state_kwargs['conv1d_weight'] = flat_state['conv1d_weight']
+    else:
+        state_kwargs['conv1d_weight'] = getattr(model.conv1d, 'weight', None)
+    if 'conv1d_bias' in flat_state:
+        state_kwargs['conv1d_bias'] = flat_state['conv1d_bias']
+    else:
+        state_kwargs['conv1d_bias'] = getattr(model.conv1d, 'bias', None)
+    state_kwargs['conv1d_stride'] = model.conv1d.stride
+    state_kwargs['conv1d_padding'] = model.conv1d.padding
+    state_kwargs['conv1d_dilation'] = model.conv1d.dilation
+    state_kwargs['conv1d_groups'] = model.conv1d.groups
+    missing = [name for name in REQUIRED_STATE_NAMES if name not in state_kwargs]
+    if missing:
+        raise RuntimeError(f'Missing required state entries: {missing}')
+    return state_kwargs
+
+
+def get_functional_inputs():
+    model = build_reference_model()
+    forward_args = tuple(get_inputs())
+    state_kwargs = extract_state_kwargs(model)
+    return forward_args, state_kwargs
+
+
+
+
+import torch
+from torch.utils.cpp_extension import load_inline
+
+# ----------------------------------------------------------------------
+# CUDA kernel: 1-D convolution optimized with weight caching in shared memory
+# ----------------------------------------------------------------------
+cuda_source = r"""
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
+extern "C" __global__ void conv1d_forward_kernel(
+    const float* __restrict__ input,
+    const float* __restrict__ weight,
+    const float* __restrict__ bias,
+    float* __restrict__ output,
+    const int batch,
+    const int in_channels,
+    const int out_channels,
+    const int in_len,
+    const int out_len,
+    const int kernel_size,
+    const int stride,
+    const int padding,
+    const int dilation,
+    const int groups)
+{
+    extern __shared__ float s_weight[];
+    
+    const int out_ch = blockIdx.x; 
+    const int batch_idx = blockIdx.y;
+    const int out_channels_per_group = out_channels / groups;
+    const int in_channels_per_group  = in_channels / groups;
+    const int group_id = out_ch / out_channels_per_group;
+
+    // Cache weights for this output channel in shared memory
+    const int weight_elems = in_channels_per_group * kernel_size;
+    const int weight_base  = out_ch * weight_elems;
+    for (int i = threadIdx.x; i < weight_elems; i += blockDim.x) {
+        s_weight[i] = weight[weight_base + i];
+    }
+    __syncthreads();
+
+    // Bias
+    float b = (bias != nullptr) ? bias[out_ch] : 0.0f;
+
+    // Output loop
+    for (int out_x = threadIdx.x; out_x < out_len; out_x += blockDim.x) {
+        float sum = b;
+        const int input_start = out_x * stride - padding;
+
+        for (int ic = 0; ic < in_channels_per_group; ++ic) {
+            const int in_c = group_id * in_channels_per_group + ic;
+            const int input_base = (batch_idx * in_channels + in_c) * in_len;
+            const int weight_offset = ic * kernel_size;
+
+            for (int k = 0; k < kernel_size; ++k) {
+                const int input_idx = input_start + k * dilation;
+                if (input_idx >= 0 && input_idx < in_len) {
+                    sum += __ldg(&input[input_base + input_idx]) * s_weight[weight_offset + k];
+                }
+            }
+        }
+        output[(batch_idx * out_channels + out_ch) * out_len + out_x] = sum;
+    }
+}
+
+void fused_op_forward(
+    at::Tensor input, at::Tensor weight, at::Tensor bias, at::Tensor output,
+    int batch, int in_channels, int out_channels, int in_len, int out_len,
+    int kernel_size, int stride, int padding, int dilation, int groups)
+{
+    int in_channels_per_group = in_channels / groups;
+    size_t shared_mem = in_channels_per_group * kernel_size * sizeof(float);
+    dim3 grid(out_channels, batch);
+    dim3 block(256);
+
+    conv1d_forward_kernel<<<grid, block, shared_mem>>>(
+        input.data_ptr<float>(), weight.data_ptr<float>(),
+        bias.defined() ? bias.data_ptr<float>() : nullptr,
+        output.data_ptr<float>(), batch, in_channels, out_channels,
+        in_len, out_len, kernel_size, stride, padding, dilation, groups);
+}
+"""
+
+cpp_source = r"""
+void fused_op_forward(at::Tensor input, at::Tensor weight, at::Tensor bias, at::Tensor output,
+    int batch, int in_channels, int out_channels, int in_len, int out_len,
+    int kernel_size, int stride, int padding, int dilation, int groups);
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("fused_op", &fused_op_forward, "Fused 1D Conv");
+}
+"""
+
+fused_ext = load_inline(name='fused_op', cpp_sources=cpp_source, cuda_sources=cuda_source, 
+                        extra_cuda_cflags=['-O3', '--use_fast_math'], with_cuda=True)
+
+def functional_model(x, *, conv1d_weight, conv1d_bias, conv1d_stride, 
+                     conv1d_padding, conv1d_dilation, conv1d_groups):
+    batch, in_channels, in_len = x.shape
+    out_channels, _, kernel_size = conv1d_weight.shape
+    out_len = (in_len + 2 * conv1d_padding - conv1d_dilation * (kernel_size - 1) - 1) // conv1d_stride + 1
+    
+    out = torch.empty((batch, out_channels, out_len), device=x.device, dtype=x.dtype)
+    bias = conv1d_bias if conv1d_bias is not None else torch.tensor([], device=x.device, dtype=x.dtype)
+    
+    fused_ext.fused_op(x, conv1d_weight, bias, out, batch, in_channels, out_channels, 
+                       in_len, out_len, kernel_size, conv1d_stride, conv1d_padding, 
+                       conv1d_dilation, conv1d_groups)
+    return out
