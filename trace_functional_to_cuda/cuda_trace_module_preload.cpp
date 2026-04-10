@@ -55,6 +55,7 @@ std::mutex g_mutex;
 std::unordered_map<const void*, KernelRegistration> g_kernels_by_host_fun;
 std::unordered_map<std::string, std::unordered_map<std::string, KernelPtx>> g_ptx_by_module;
 std::unordered_map<std::string, bool> g_ptx_loaded_by_module;
+std::unordered_map<std::string, std::string> g_ptx_load_error_by_module;
 JsonSink g_json_sink;
 uint64_t g_event_sequence = 0;
 
@@ -483,7 +484,17 @@ void ensure_ptx_loaded_for_module(const std::string& module_path) {
         return;
     }
     g_ptx_loaded_by_module[module_path] = true;
-    parse_ptx_dump(run_cuobjdump_dump_ptx(module_path), g_ptx_by_module[module_path]);
+    std::string dump = run_cuobjdump_dump_ptx(module_path);
+    if (dump.empty()) {
+        g_ptx_load_error_by_module[module_path] = "cuobjdump_dump_ptx_failed";
+        return;
+    }
+    parse_ptx_dump(dump, g_ptx_by_module[module_path]);
+    if (g_ptx_by_module[module_path].empty()) {
+        g_ptx_load_error_by_module[module_path] = "ptx_parse_found_no_entries";
+        return;
+    }
+    g_ptx_load_error_by_module.erase(module_path);
 }
 
 void attach_source_type_hints(const KernelRegistration& reg, std::vector<ParamSpec>& params) {
@@ -502,14 +513,31 @@ const KernelPtx* find_kernel_ptx(const KernelRegistration& reg) {
     if (module_it == g_ptx_by_module.end()) {
         return nullptr;
     }
+    std::vector<std::string> candidates;
     if (!reg.device_fun.empty()) {
-        const auto it = module_it->second.find(reg.device_fun);
-        if (it != module_it->second.end()) {
-            return &it->second;
+        candidates.push_back(reg.device_fun);
+        const std::string demangled = demangle_name(reg.device_fun);
+        if (demangled != reg.device_fun) {
+            candidates.push_back(demangled);
+            const size_t open = demangled.find('(');
+            if (open != std::string::npos && open > 0) {
+                candidates.push_back(demangled.substr(0, open));
+            }
         }
     }
     if (!reg.device_name.empty()) {
-        const auto it = module_it->second.find(reg.device_name);
+        candidates.push_back(reg.device_name);
+        const std::string demangled = demangle_name(reg.device_name);
+        if (demangled != reg.device_name) {
+            candidates.push_back(demangled);
+            const size_t open = demangled.find('(');
+            if (open != std::string::npos && open > 0) {
+                candidates.push_back(demangled.substr(0, open));
+            }
+        }
+    }
+    for (const std::string& candidate : candidates) {
+        const auto it = module_it->second.find(candidate);
         if (it != module_it->second.end()) {
             return &it->second;
         }
@@ -636,9 +664,27 @@ void log_kernel_launch(const char* api_name,
     ensure_ptx_loaded_for_module(reg.module_path);
     const KernelPtx* ptx = find_kernel_ptx(reg);
     std::vector<ParamSpec> params;
-    if (ptx != nullptr) {
+    bool args_known = false;
+    std::string args_known_reason;
+    if (args == nullptr) {
+        args_known_reason = "launch_args_unavailable";
+    } else if (reg.module_path.empty()) {
+        args_known_reason = "module_path_unavailable";
+    } else if (ptx == nullptr) {
+        const auto error_it = g_ptx_load_error_by_module.find(reg.module_path);
+        if (error_it != g_ptx_load_error_by_module.end() && !error_it->second.empty()) {
+            args_known_reason = error_it->second;
+        } else {
+            args_known_reason = "ptx_symbol_lookup_failed";
+        }
+    } else {
         params = ptx->params;
         attach_source_type_hints(reg, params);
+        if (params.empty()) {
+            args_known_reason = "ptx_param_metadata_missing";
+        } else {
+            args_known = true;
+        }
     }
 
     std::ostringstream oss;
@@ -659,7 +705,8 @@ void log_kernel_launch(const char* api_name,
     append_json_dim3_field(oss, "block", block_dim, first);
     append_json_integer_field(oss, "shared_mem_bytes", shared_mem, first);
     append_json_string_field(oss, "stream", pointer_string(stream), first);
-    append_json_bool_field(oss, "args_known", args != nullptr && !params.empty(), first);
+    append_json_bool_field(oss, "args_known", args_known, first);
+    append_json_string_field(oss, "args_known_reason", args_known ? std::string() : args_known_reason, first);
     if (!first) {
         oss << ',';
     }
