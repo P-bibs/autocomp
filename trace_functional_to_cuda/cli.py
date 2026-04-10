@@ -72,6 +72,7 @@ class TraceFunctionalToCudaError(RuntimeError):
 class BatchTraceTask:
     relative_model_path: Path
     model_file: Path
+    kernelbench_functional_file: Path
     input_json: Path
     output_json: Path
 
@@ -82,6 +83,7 @@ class ProblemArtifacts:
     problem_id: str
     spec_json: Path
     spec_cpp: Path
+    kernelbench_functional_file: Path
     output_cpp: Path
 
 
@@ -440,17 +442,26 @@ def _merge_event_streams(torch_events: list[dict[str, Any]], kernel_events: list
     return merged
 
 
-def _child_trace(model_file: Path, function_name: str, device: str, bundle_output: Path) -> int:
+def _child_trace(
+    model_file: Path,
+    kernelbench_functional_file: Path,
+    function_name: str,
+    device: str,
+    bundle_output: Path,
+) -> int:
     resolved_device = _ensure_cuda_available(device)
     kernel_trace_path = Path(os.environ["CUDA_TRACE_JSON_PATH"])
-    module = _load_module_from_path(model_file)
+    model_module = _load_module_from_path(model_file)
+    reference_module = _load_module_from_path(kernelbench_functional_file)
 
-    if not hasattr(module, "get_functional_inputs"):
-        raise TraceFunctionalToCudaError(f"{model_file} does not define get_functional_inputs()")
-    if not hasattr(module, function_name):
+    if not hasattr(reference_module, "get_functional_inputs"):
+        raise TraceFunctionalToCudaError(
+            f"{kernelbench_functional_file} does not define get_functional_inputs()"
+        )
+    if not hasattr(model_module, function_name):
         raise TraceFunctionalToCudaError(f"{model_file} does not define {function_name}()")
 
-    forward_args, state_kwargs = module.get_functional_inputs()
+    forward_args, state_kwargs = reference_module.get_functional_inputs()
     if not isinstance(state_kwargs, dict):
         raise TraceFunctionalToCudaError("get_functional_inputs() must return (forward_args, state_kwargs)")
     forward_args = tuple(forward_args)
@@ -461,7 +472,7 @@ def _child_trace(model_file: Path, function_name: str, device: str, bundle_outpu
 
     registry = TensorRegistry()
 
-    positional_names = list(getattr(module, "FORWARD_ARG_NAMES", []))
+    positional_names = list(getattr(reference_module, "FORWARD_ARG_NAMES", []))
     if positional_names and len(positional_names) != len(moved_args):
         raise TraceFunctionalToCudaError(
             f"FORWARD_ARG_NAMES has {len(positional_names)} names but get_functional_inputs() returned {len(moved_args)} forward args"
@@ -472,7 +483,7 @@ def _child_trace(model_file: Path, function_name: str, device: str, bundle_outpu
             name = positional_names[index] if positional_names else f"arg_{index}"
             registry.register_input(name, value)
 
-    required_state_names = list(getattr(module, "REQUIRED_STATE_NAMES", moved_state.keys()))
+    required_state_names = list(getattr(reference_module, "REQUIRED_STATE_NAMES", moved_state.keys()))
     for name in required_state_names:
         value = moved_state.get(name)
         if isinstance(value, torch.Tensor):
@@ -480,7 +491,7 @@ def _child_trace(model_file: Path, function_name: str, device: str, bundle_outpu
 
     torch.cuda.synchronize(resolved_device)
     tracer = DispatchTracer(registry)
-    function = getattr(module, function_name)
+    function = getattr(model_module, function_name)
     start_ns = time.monotonic_ns()
     with tracer:
         result = function(*moved_args, **moved_state)
@@ -494,6 +505,7 @@ def _child_trace(model_file: Path, function_name: str, device: str, bundle_outpu
     kernel_events = _load_kernel_events(kernel_trace_path, os.getpid(), start_ns, end_ns)
     bundle = {
         "model_file": str(model_file),
+        "kernelbench_functional_file": str(kernelbench_functional_file),
         "device": str(resolved_device),
         "trace_window": {"start_ns": start_ns, "end_ns": end_ns},
         "tensor_registry": registry.bundle(),
@@ -700,6 +712,7 @@ def _run_child_process(
 
 def _run_child_trace(
     model_file: Path,
+    kernelbench_functional_file: Path,
     function_name: str,
     device: str,
     preload_library: Path,
@@ -727,6 +740,8 @@ def _run_child_trace(
             "__child_trace__",
             "--model-file",
             str(model_file),
+            "--kernelbench-functional-file",
+            str(kernelbench_functional_file),
             "--function-name",
             function_name,
             "--device",
@@ -960,6 +975,7 @@ def _canonical_json(data: dict[str, Any]) -> str:
 
 def trace_functional_model_to_json(
     model_file: str | Path,
+    kernelbench_functional_file: str | Path,
     input_json: str | Path,
     output_json: str | Path,
     *,
@@ -969,11 +985,16 @@ def trace_functional_model_to_json(
     child_timeout_seconds: float = DEFAULT_CHILD_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     model_path = Path(model_file).resolve()
+    kernelbench_functional_path = Path(kernelbench_functional_file).resolve()
     input_path = Path(input_json).resolve()
     output_path = Path(output_json).resolve()
 
     if not model_path.exists():
         raise TraceFunctionalToCudaError(f"Model file does not exist: {model_path}")
+    if not kernelbench_functional_path.exists():
+        raise TraceFunctionalToCudaError(
+            f"KernelBenchFunctional file does not exist: {kernelbench_functional_path}"
+        )
     if not input_path.exists():
         raise TraceFunctionalToCudaError(f"Input JSON does not exist: {input_path}")
 
@@ -987,6 +1008,7 @@ def trace_functional_model_to_json(
     def run_once() -> dict[str, Any]:
         trace_bundle = _run_child_trace(
             model_path,
+            kernelbench_functional_path,
             function_name,
             device,
             preload_library,
@@ -1038,9 +1060,25 @@ def _match_problem_file(spec_level_dir: Path, problem_id: str, suffix: str) -> P
     return matches[0]
 
 
+def _match_kernelbench_functional_file(kernelbench_level_dir: Path, problem_id: str) -> Path:
+    matches = sorted(kernelbench_level_dir.glob(f"{problem_id}_*.py"))
+    if not matches:
+        raise TraceFunctionalToCudaError(
+            f"Missing KernelBenchFunctional file for problem {problem_id} in {kernelbench_level_dir}: "
+            f"expected exactly one {problem_id}_*.py"
+        )
+    if len(matches) != 1:
+        raise TraceFunctionalToCudaError(
+            f"Ambiguous KernelBenchFunctional file for problem {problem_id} in {kernelbench_level_dir}: "
+            f"found {len(matches)} matches for {problem_id}_*.py"
+        )
+    return matches[0]
+
+
 def _resolve_problem_artifacts(
     model_root: Path,
     spec_root: Path,
+    kernelbench_functional_root: Path,
     output_root: Path,
 ) -> tuple[list[BatchTraceTask], list[ProblemArtifacts]]:
     tasks: list[BatchTraceTask] = []
@@ -1069,14 +1107,24 @@ def _resolve_problem_artifacts(
             spec_level_dir = spec_root / level_name
             if not spec_level_dir.is_dir():
                 raise TraceFunctionalToCudaError(f"Missing spec level directory: {spec_level_dir}")
+            kernelbench_level_dir = kernelbench_functional_root / level_name
+            if not kernelbench_level_dir.is_dir():
+                raise TraceFunctionalToCudaError(
+                    f"Missing KernelBenchFunctional level directory: {kernelbench_level_dir}"
+                )
             spec_json = _match_problem_file(spec_level_dir, problem_id, ".json")
             spec_cpp = _match_problem_file(spec_level_dir, problem_id, ".cpp")
+            kernelbench_functional_file = _match_kernelbench_functional_file(
+                kernelbench_level_dir,
+                problem_id,
+            )
             output_problem_dir = output_root / level_name / problem_id
             artifacts = ProblemArtifacts(
                 level_name=level_name,
                 problem_id=problem_id,
                 spec_json=spec_json,
                 spec_cpp=spec_cpp,
+                kernelbench_functional_file=kernelbench_functional_file,
                 output_cpp=output_problem_dir / spec_cpp.name,
             )
             problems[problem_key] = artifacts
@@ -1085,6 +1133,7 @@ def _resolve_problem_artifacts(
             BatchTraceTask(
                 relative_model_path=relative_model_path,
                 model_file=model_file,
+                kernelbench_functional_file=artifacts.kernelbench_functional_file,
                 input_json=artifacts.spec_json,
                 output_json=(output_root / relative_model_path).with_suffix(".json"),
             )
@@ -1115,6 +1164,7 @@ def _process_batch_trace_task(
         task.output_json.parent.mkdir(parents=True, exist_ok=True)
         trace_functional_model_to_json(
             task.model_file,
+            task.kernelbench_functional_file,
             task.input_json,
             task.output_json,
             device=device,
@@ -1145,6 +1195,7 @@ def _start_thread_to_terminate_when_parent_process_dies(ppid: int) -> None:
 def trace_functional_models_to_json_batch(
     model_dir: str | Path,
     spec_dir: str | Path,
+    kernelbench_functional_dir: str | Path,
     output_dir: str | Path,
     *,
     device: str = "cuda:0",
@@ -1156,17 +1207,28 @@ def trace_functional_models_to_json_batch(
 ) -> dict[str, Any]:
     model_root = Path(model_dir).resolve()
     spec_root = Path(spec_dir).resolve()
+    kernelbench_functional_root = Path(kernelbench_functional_dir).resolve()
     output_root = Path(output_dir).resolve()
 
     if not model_root.is_dir():
         raise TraceFunctionalToCudaError(f"Model directory does not exist or is not a directory: {model_root}")
     if not spec_root.is_dir():
         raise TraceFunctionalToCudaError(f"Spec directory does not exist or is not a directory: {spec_root}")
+    if not kernelbench_functional_root.is_dir():
+        raise TraceFunctionalToCudaError(
+            "KernelBenchFunctional directory does not exist or is not a directory: "
+            f"{kernelbench_functional_root}"
+        )
     if jobs < 1:
         raise TraceFunctionalToCudaError(f"--jobs must be at least 1, got {jobs}")
 
     output_root.mkdir(parents=True, exist_ok=True)
-    tasks, problems = _resolve_problem_artifacts(model_root, spec_root, output_root)
+    tasks, problems = _resolve_problem_artifacts(
+        model_root,
+        spec_root,
+        kernelbench_functional_root,
+        output_root,
+    )
     for artifacts in problems:
         _copy_problem_cpp(artifacts, force=force)
 
@@ -1248,6 +1310,7 @@ def trace_functional_models_to_json_batch(
 def _child_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=argparse.SUPPRESS)
     parser.add_argument("--model-file", required=True)
+    parser.add_argument("--kernelbench-functional-file", required=True)
     parser.add_argument("--function-name", default="functional_model")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--bundle-output", required=True)
@@ -1260,6 +1323,10 @@ def _public_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("model_dir", help="Root directory containing solution files to trace")
     parser.add_argument("spec_dir", help="Root directory containing per-problem input pipeline JSON and CPP files")
+    parser.add_argument(
+        "kernelbench_functional_dir",
+        help="Root directory containing KernelBenchFunctional reference problem files",
+    )
     parser.add_argument("output_dir", help="Root directory to write mirrored output JSON files into")
     parser.add_argument("--device", default="cuda:0", help="CUDA device to use for tracing")
     parser.add_argument("--function-name", default="functional_model", help="Function to invoke inside the model module")
@@ -1287,6 +1354,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             return _child_trace(
                 Path(args.model_file),
+                Path(args.kernelbench_functional_file),
                 args.function_name,
                 args.device,
                 Path(args.bundle_output),
@@ -1300,6 +1368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = trace_functional_models_to_json_batch(
             args.model_dir,
             args.spec_dir,
+            args.kernelbench_functional_dir,
             args.output_dir,
             device=args.device,
             function_name=args.function_name,
