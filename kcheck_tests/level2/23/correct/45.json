@@ -1,0 +1,67 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 9437184
+    },
+    "conv_weight": {
+      "size": 1944
+    },
+    "conv_bias": {
+      "size": 24
+    },
+    "group_norm_weight": {
+      "size": 24
+    },
+    "group_norm_bias": {
+      "size": 24
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 128
+    }
+  },
+  "constants": {
+    "trace_const_000": 24,
+    "trace_const_001": 128
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "23_Conv3d_GroupNorm_Mean.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_521998d2_7_cuda_cu_31ab1b4b4cuda3std3__439_GLOBAL__N__521998d2_7_cuda_cu_31ab1b4b6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_521998d2_7_cuda_cu_31ab1b4b4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_521998d2_7_cuda_cu_31ab1b4b4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_521998d2_7_cuda_cu_31ab1b4b4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_521998d2_7_cuda_cu_31ab1b4b4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_521998d2_7_cuda_cu_31ab1b4b6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z24compute_bias_mean_kernelPKfPfii(\n.param .u64 _Z24compute_bias_mean_kernelPKfPfii_param_0,\n.param .u64 _Z24compute_bias_mean_kernelPKfPfii_param_1,\n.param .u32 _Z24compute_bias_mean_kernelPKfPfii_param_2,\n.param .u32 _Z24compute_bias_mean_kernelPKfPfii_param_3\n)\n{\n.reg .pred %p<20>;\n.reg .f32 %f<52>;\n.reg .b32 %r<64>;\n.reg .b64 %rd<13>;\n//\n.shared .align 4 .b8 _ZZ24compute_bias_mean_kernelPKfPfiiE9warp_sums[32];\n\nld.param.u64 %rd7, [_Z24compute_bias_mean_kernelPKfPfii_param_0];\nld.param.u64 %rd8, [_Z24compute_bias_mean_kernelPKfPfii_param_1];\nld.param.u32 %r25, [_Z24compute_bias_mean_kernelPKfPfii_param_2];\nld.param.u32 %r26, [_Z24compute_bias_mean_kernelPKfPfii_param_3];\nmov.u32 %r63, %tid.x;\nmov.u32 %r2, %ntid.x;\nshr.u32 %r3, %r2, 5;\nsetp.ge.s32 %p1, %r63, %r25;\nmov.f32 %f46, 0f00000000;\n@%p1 bra $L__BB0_6;\n\nmul.wide.s32 %rd1, %r2, 4;\ncvta.to.global.u64 %rd2, %rd7;\nmov.f32 %f46, 0f00000000;\nmov.u32 %r56, %r63;\n\n$L__BB0_2:\n.pragma \"nounroll\";\nmul.wide.s32 %rd9, %r56, 4;\nadd.s64 %rd3, %rd2, %rd9;\nld.global.nc.f32 %f18, [%rd3];\nadd.ftz.f32 %f46, %f46, %f18;\nadd.s32 %r5, %r56, %r2;\nsetp.ge.s32 %p2, %r5, %r25;\n@%p2 bra $L__BB0_6;\n\nadd.s64 %rd4, %rd3, %rd1;\nld.global.nc.f32 %f19, [%rd4];\nadd.ftz.f32 %f46, %f46, %f19;\nadd.s32 %r6, %r5, %r2;\nsetp.ge.s32 %p3, %r6, %r25;\n@%p3 bra $L__BB0_6;\n\nadd.s64 %rd5, %rd4, %rd1;\nld.global.nc.f32 %f20, [%rd5];\nadd.ftz.f32 %f46, %f46, %f20;\nadd.s32 %r7, %r6, %r2;\nsetp.ge.s32 %p4, %r7, %r25;\n@%p4 bra $L__BB0_6;\n\nadd.s64 %rd10, %rd5, %rd1;\nld.global.nc.f32 %f21, [%rd10];\nadd.ftz.f32 %f46, %f46, %f21;\nadd.s32 %r56, %r7, %r2;\nsetp.lt.s32 %p5, %r56, %r25;\n@%p5 bra $L__BB0_2;\n\n$L__BB0_6:\nmov.b32 %r27, %f46;\nmov.u32 %r28, 2;\nmov.u32 %r29, 31;\nmov.u32 %r30, 16;\nmov.u32 %r31, -1;\nshfl.sync.down.b32 %r32|%p6, %r27, %r30, %r29, %r31;\nmov.b32 %f22, %r32;\nadd.ftz.f32 %f23, %f46, %f22;\nmov.b32 %r33, %f23;\nmov.u32 %r34, 8;\nshfl.sync.down.b32 %r35|%p7, %r33, %r34, %r29, %r31;\nmov.b32 %f24, %r35;\nadd.ftz.f32 %f25, %f23, %f24;\nmov.b32 %r36, %f25;\nmov.u32 %r37, 4;\nshfl.sync.down.b32 %r38|%p8, %r36, %r37, %r29, %r31;\nmov.b32 %f26, %r38;\nadd.ftz.f32 %f27, %f25, %f26;\nmov.b32 %r39, %f27;\nshfl.sync.down.b32 %r40|%p9, %r39, %r28, %r29, %r31;\nmov.b32 %f28, %r40;\nadd.ftz.f32 %f29, %f27, %f28;\nmov.b32 %r41, %f29;\nmov.u32 %r42, 1;\nshfl.sync.down.b32 %r43|%p10, %r41, %r42, %r29, %r31;\nmov.b32 %f30, %r43;\nadd.ftz.f32 %f7, %f29, %f30;\nand.b32 %r44, %r63, 31;\nsetp.ne.s32 %p11, %r44, 0;\n@%p11 bra $L__BB0_8;\n\nmov.u32 %r45, %tid.x;\nshr.s32 %r46, %r45, 5;\nshl.b32 %r47, %r46, 2;\nmov.u32 %r48, _ZZ24compute_bias_mean_kernelPKfPfiiE9warp_sums;\nadd.s32 %r49, %r48, %r47;\nst.shared.f32 [%r49], %f7;\n\n$L__BB0_8:\nbar.sync 0;\nsetp.ne.s32 %p12, %r63, 0;\n@%p12 bra $L__BB0_17;\n\nsetp.eq.s32 %p13, %r3, 0;\nmov.f32 %f51, 0f00000000;\n@%p13 bra $L__BB0_16;\n\nadd.s32 %r51, %r3, -1;\nand.b32 %r62, %r3, 3;\nsetp.lt.u32 %p14, %r51, 3;\nmov.f32 %f51, 0f00000000;\nmov.u32 %r60, 0;\n@%p14 bra $L__BB0_13;\n\nsub.s32 %r59, %r3, %r62;\nmov.f32 %f51, 0f00000000;\nmov.u32 %r60, 0;\nmov.u32 %r57, _ZZ24compute_bias_mean_kernelPKfPfiiE9warp_sums;\n\n$L__BB0_12:\n.pragma \"nounroll\";\nld.shared.f32 %f35, [%r57];\nadd.ftz.f32 %f36, %f51, %f35;\nld.shared.f32 %f37, [%r57+4];\nadd.ftz.f32 %f38, %f36, %f37;\nld.shared.f32 %f39, [%r57+8];\nadd.ftz.f32 %f40, %f38, %f39;\nld.shared.f32 %f41, [%r57+12];\nadd.ftz.f32 %f51, %f40, %f41;\nadd.s32 %r60, %r60, 4;\nadd.s32 %r57, %r57, 16;\nadd.s32 %r59, %r59, -4;\nsetp.ne.s32 %p15, %r59, 0;\n@%p15 bra $L__BB0_12;\n\n$L__BB0_13:\nsetp.eq.s32 %p16, %r62, 0;\n@%p16 bra $L__BB0_16;\n\nshl.b32 %r54, %r60, 2;\nmov.u32 %r55, _ZZ24compute_bias_mean_kernelPKfPfiiE9warp_sums;\nadd.s32 %r61, %r55, %r54;\n\n$L__BB0_15:\n.pragma \"nounroll\";\nld.shared.f32 %f42, [%r61];\nadd.ftz.f32 %f51, %f51, %f42;\nadd.s32 %r61, %r61, 4;\nadd.s32 %r62, %r62, -1;\nsetp.ne.s32 %p17, %r62, 0;\n@%p17 bra $L__BB0_15;\n\n$L__BB0_16:\ncvt.rn.f32.s32 %f43, %r25;\ndiv.approx.ftz.f32 %f44, %f51, %f43;\nst.shared.f32 [_ZZ24compute_bias_mean_kernelPKfPfiiE9warp_sums], %f44;\n\n$L__BB0_17:\nbar.sync 0;\nsetp.ge.s32 %p18, %r63, %r26;\n@%p18 bra $L__BB0_20;\n\nld.shared.f32 %f15, [_ZZ24compute_bias_mean_kernelPKfPfiiE9warp_sums];\ncvta.to.global.u64 %rd6, %rd8;\n\n$L__BB0_19:\nmul.wide.s32 %rd11, %r63, 4;\nadd.s64 %rd12, %rd6, %rd11;\nst.global.f32 [%rd12], %f15;\nadd.s32 %r63, %r63, %r2;\nsetp.lt.s32 %p19, %r63, %r26;\n@%p19 bra $L__BB0_19;\n\n$L__BB0_20:\nret;\n\n}",
+          "kernel": "_Z24compute_bias_mean_kernelPKfPfii",
+          "defines": {},
+          "arguments": [
+            "group_norm_bias",
+            "out",
+            "trace_const_000",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            1,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

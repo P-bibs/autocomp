@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_e9349789_7_cuda_cu_e40a7a434cuda3std3__439_GLOBAL__N__e9349789_7_cuda_cu_e40a7a436ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e9349789_7_cuda_cu_e40a7a434cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e9349789_7_cuda_cu_e40a7a434cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e9349789_7_cuda_cu_e40a7a434cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e9349789_7_cuda_cu_e40a7a434cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e9349789_7_cuda_cu_e40a7a436thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii(\n.param .u64 _Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_0,\n.param .u64 _Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_1,\n.param .u64 _Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_2,\n.param .u32 _Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_3,\n.param .u32 _Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_4\n)\n{\n.reg .pred %p<5>;\n.reg .b32 %r<17>;\n.reg .f64 %fd<5>;\n.reg .b64 %rd<14>;\n//\n.shared .align 8 .b8 _ZZ26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_iiE4tile[2112];\n\nld.param.u64 %rd1, [_Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_0];\nld.param.u64 %rd2, [_Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_1];\nld.param.u64 %rd3, [_Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_2];\nld.param.u32 %r5, [_Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_3];\nld.param.u32 %r4, [_Z26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_ii_param_4];\nmov.u32 %r6, %ctaid.y;\nshl.b32 %r7, %r6, 3;\nmov.u32 %r8, %ctaid.x;\nshl.b32 %r9, %r8, 5;\nmov.u32 %r10, %tid.y;\nadd.s32 %r1, %r7, %r10;\nmov.u32 %r11, %tid.x;\nadd.s32 %r2, %r9, %r11;\nsetp.lt.s32 %p2, %r1, %r5;\nsetp.lt.s32 %p3, %r2, %r4;\nand.pred %p1, %p2, %p3;\nmov.u32 %r12, _ZZ26broadcast_mul_tiled_kernelIdEvPKT_S2_PS0_iiE4tile;\nmad.lo.s32 %r13, %r10, 264, %r12;\nshl.b32 %r14, %r11, 3;\nadd.s32 %r3, %r13, %r14;\n@%p1 bra $L__BB0_2;\nbra.uni $L__BB0_1;\n\n$L__BB0_2:\ncvta.to.global.u64 %rd5, %rd2;\nmad.lo.s32 %r15, %r1, %r4, %r2;\nmul.wide.s32 %rd6, %r15, 8;\nadd.s64 %rd7, %rd5, %rd6;\nld.global.nc.f64 %fd1, [%rd7];\nst.shared.f64 [%r3], %fd1;\nbra.uni $L__BB0_3;\n\n$L__BB0_1:\nmov.u64 %rd4, 0;\nst.shared.u64 [%r3], %rd4;\n\n$L__BB0_3:\nbar.sync 0;\nnot.pred %p4, %p1;\n@%p4 bra $L__BB0_5;\n\ncvta.to.global.u64 %rd8, %rd1;\nmul.wide.s32 %rd9, %r1, 8;\nadd.s64 %rd10, %rd8, %rd9;\nld.shared.f64 %fd2, [%r3];\nld.global.nc.f64 %fd3, [%rd10];\nmul.f64 %fd4, %fd3, %fd2;\nmad.lo.s32 %r16, %r1, %r4, %r2;\ncvta.to.global.u64 %rd11, %rd3;\nmul.wide.s32 %rd12, %r16, 8;\nadd.s64 %rd13, %rd11, %rd12;\nst.global.f64 [%rd13], %fd4;\n\n$L__BB0_5:\nret;\n\n}\n//\n.visible .entry _Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii(\n.param .u64 _Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_0,\n.param .u64 _Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_1,\n.param .u64 _Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_2,\n.param .u32 _Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_3,\n.param .u32 _Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_4\n)\n{\n.reg .pred %p<5>;\n.reg .f32 %f<5>;\n.reg .b32 %r<18>;\n.reg .b64 %rd<13>;\n//\n.shared .align 4 .b8 _ZZ26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_iiE4tile[1056];\n\nld.param.u64 %rd1, [_Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_0];\nld.param.u64 %rd2, [_Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_1];\nld.param.u64 %rd3, [_Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_2];\nld.param.u32 %r5, [_Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_3];\nld.param.u32 %r4, [_Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii_param_4];\nmov.u32 %r6, %ctaid.y;\nshl.b32 %r7, %r6, 3;\nmov.u32 %r8, %ctaid.x;\nshl.b32 %r9, %r8, 5;\nmov.u32 %r10, %tid.y;\nadd.s32 %r1, %r7, %r10;\nmov.u32 %r11, %tid.x;\nadd.s32 %r2, %r9, %r11;\nsetp.lt.s32 %p2, %r1, %r5;\nsetp.lt.s32 %p3, %r2, %r4;\nand.pred %p1, %p2, %p3;\nmov.u32 %r12, _ZZ26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_iiE4tile;\nmad.lo.s32 %r13, %r10, 132, %r12;\nshl.b32 %r14, %r11, 2;\nadd.s32 %r3, %r13, %r14;\n@%p1 bra $L__BB1_2;\nbra.uni $L__BB1_1;\n\n$L__BB1_2:\ncvta.to.global.u64 %rd4, %rd2;\nmad.lo.s32 %r16, %r1, %r4, %r2;\nmul.wide.s32 %rd5, %r16, 4;\nadd.s64 %rd6, %rd4, %rd5;\nld.global.nc.f32 %f1, [%rd6];\nst.shared.f32 [%r3], %f1;\nbra.uni $L__BB1_3;\n\n$L__BB1_1:\nmov.u32 %r15, 0;\nst.shared.u32 [%r3], %r15;\n\n$L__BB1_3:\nbar.sync 0;\nnot.pred %p4, %p1;\n@%p4 bra $L__BB1_5;\n\ncvta.to.global.u64 %rd7, %rd1;\nmul.wide.s32 %rd8, %r1, 4;\nadd.s64 %rd9, %rd7, %rd8;\nld.shared.f32 %f2, [%r3];\nld.global.nc.f32 %f3, [%rd9];\nmul.ftz.f32 %f4, %f3, %f2;\nmad.lo.s32 %r17, %r1, %r4, %r2;\ncvta.to.global.u64 %rd10, %rd3;\nmul.wide.s32 %rd11, %r17, 4;\nadd.s64 %rd12, %rd10, %rd11;\nst.global.f32 [%rd12], %f4;\n\n$L__BB1_5:\nret;\n\n}",
+          "kernel": "_Z26broadcast_mul_tiled_kernelIfEvPKT_S2_PS0_ii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            128,
+            512,
+            1
+          ],
+          "block_dim": [
+            32,
+            8,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,57 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 4096,
+    "trace_const_002": 4095
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "47_Sum_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_f924aeaf_7_cuda_cu_fa4245da4cuda3std3__439_GLOBAL__N__f924aeaf_7_cuda_cu_fa4245da6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_f924aeaf_7_cuda_cu_fa4245da4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_f924aeaf_7_cuda_cu_fa4245da4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_f924aeaf_7_cuda_cu_fa4245da4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_f924aeaf_7_cuda_cu_fa4245da4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_f924aeaf_7_cuda_cu_fa4245da6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n.extern .shared .align 16 .b8 smem[];\n\n.visible .entry _Z20sum_dim1_tile_kernelPKfPfiii(\n.param .u64 _Z20sum_dim1_tile_kernelPKfPfiii_param_0,\n.param .u64 _Z20sum_dim1_tile_kernelPKfPfiii_param_1,\n.param .u32 _Z20sum_dim1_tile_kernelPKfPfiii_param_2,\n.param .u32 _Z20sum_dim1_tile_kernelPKfPfiii_param_3,\n.param .u32 _Z20sum_dim1_tile_kernelPKfPfiii_param_4\n)\n{\n.reg .pred %p<37>;\n.reg .f32 %f<109>;\n.reg .b32 %r<54>;\n.reg .b64 %rd<11>;\n\n\nld.param.u64 %rd7, [_Z20sum_dim1_tile_kernelPKfPfiii_param_0];\nld.param.u64 %rd6, [_Z20sum_dim1_tile_kernelPKfPfiii_param_1];\nld.param.u32 %r28, [_Z20sum_dim1_tile_kernelPKfPfiii_param_3];\nld.param.u32 %r29, [_Z20sum_dim1_tile_kernelPKfPfiii_param_4];\ncvta.to.global.u64 %rd1, %rd7;\nmov.u32 %r31, %ctaid.y;\nshl.b32 %r32, %r31, 9;\nmov.u32 %r33, %tid.x;\nshl.b32 %r1, %r33, 2;\nadd.s32 %r2, %r32, %r1;\nor.b32 %r3, %r2, 1;\nor.b32 %r4, %r2, 2;\nor.b32 %r5, %r2, 3;\nmov.u32 %r34, %ctaid.x;\nmul.lo.s32 %r6, %r34, %r29;\nmad.lo.s32 %r35, %r6, %r28, %r32;\nadd.s32 %r50, %r35, %r1;\nshl.b32 %r8, %r29, 1;\nmad.lo.s32 %r36, %r34, %r28, 1;\nmad.lo.s32 %r37, %r29, %r36, %r32;\nadd.s32 %r38, %r37, %r1;\nadd.s32 %r49, %r38, 3;\nshl.b32 %r39, %r33, 4;\nmov.u32 %r40, smem;\nadd.s32 %r41, %r40, %r39;\nadd.s32 %r48, %r41, 2048;\nmov.u32 %r51, 0;\n\n$L__BB0_1:\nsetp.ge.s32 %p1, %r51, %r28;\n@%p1 bra $L__BB0_10;\n\nsetp.ge.s32 %p2, %r2, %r29;\nmul.wide.s32 %rd8, %r50, 4;\nadd.s64 %rd2, %rd1, %rd8;\n@%p2 bra $L__BB0_4;\n\nld.global.nc.f32 %f49, [%rd2];\nst.shared.f32 [%r48+-2048], %f49;\n\n$L__BB0_4:\nsetp.ge.s32 %p3, %r3, %r29;\n@%p3 bra $L__BB0_6;\n\nld.global.nc.f32 %f50, [%rd2+4];\nst.shared.f32 [%r48+-2044], %f50;\n\n$L__BB0_6:\nsetp.ge.s32 %p4, %r4, %r29;\n@%p4 bra $L__BB0_8;\n\nld.global.nc.f32 %f51, [%rd2+8];\nst.shared.f32 [%r48+-2040], %f51;\n\n$L__BB0_8:\nsetp.ge.s32 %p5, %r5, %r29;\n@%p5 bra $L__BB0_10;\n\nld.global.nc.f32 %f52, [%rd2+12];\nst.shared.f32 [%r48+-2036], %f52;\n\n$L__BB0_10:\nadd.s32 %r15, %r51, 1;\nsetp.ge.s32 %p6, %r15, %r28;\n@%p6 bra $L__BB0_19;\n\nsetp.ge.s32 %p7, %r2, %r29;\nadd.s32 %r42, %r49, -3;\nmul.wide.s32 %rd9, %r42, 4;\nadd.s64 %rd3, %rd1, %rd9;\n@%p7 bra $L__BB0_13;\n\nld.global.nc.f32 %f53, [%rd3];\nst.shared.f32 [%r48], %f53;\n\n$L__BB0_13:\nsetp.ge.s32 %p8, %r3, %r29;\n@%p8 bra $L__BB0_15;\n\nld.global.nc.f32 %f54, [%rd3+4];\nst.shared.f32 [%r48+4], %f54;\n\n$L__BB0_15:\nsetp.ge.s32 %p9, %r4, %r29;\n@%p9 bra $L__BB0_17;\n\nld.global.nc.f32 %f55, [%rd3+8];\nst.shared.f32 [%r48+8], %f55;\n\n$L__BB0_17:\nsetp.ge.s32 %p10, %r5, %r29;\n@%p10 bra $L__BB0_19;\n\nld.global.nc.f32 %f56, [%rd3+12];\nst.shared.f32 [%r48+12], %f56;\n\n$L__BB0_19:\nadd.s32 %r50, %r50, %r8;\nadd.s32 %r49, %r49, %r8;\nadd.s32 %r48, %r48, 4096;\nadd.s32 %r51, %r15, 1;\nsetp.ne.s32 %p11, %r51, 16;\n@%p11 bra $L__BB0_1;\n\ncvta.to.global.u64 %rd4, %rd6;\nbar.sync 0;\nshl.b32 %r44, %r1, 2;\nadd.s32 %r46, %r40, %r44;\nadd.s32 %r52, %r46, 4096;\nmov.u32 %r53, 0;\nmov.f32 %f91, 0f00000000;\nmov.f32 %f92, %f91;\nmov.f32 %f93, %f91;\nmov.f32 %f94, %f91;\n\n$L__BB0_21:\nsetp.ge.s32 %p12, %r53, %r28;\n@%p12 bra $L__BB0_30;\n\nsetp.ge.s32 %p13, %r2, %r29;\n@%p13 bra $L__BB0_24;\n\nld.shared.f32 %f61, [%r52+-4096];\nadd.ftz.f32 %f94, %f61, %f94;\n\n$L__BB0_24:\nsetp.ge.s32 %p14, %r3, %r29;\n@%p14 bra $L__BB0_26;\n\nld.shared.f32 %f62, [%r52+-4092];\nadd.ftz.f32 %f93, %f62, %f93;\n\n$L__BB0_26:\nsetp.ge.s32 %p15, %r4, %r29;\n@%p15 bra $L__BB0_28;\n\nld.shared.f32 %f63, [%r52+-4088];\nadd.ftz.f32 %f92, %f63, %f92;\n\n$L__BB0_28:\nsetp.ge.s32 %p16, %r5, %r29;\n@%p16 bra $L__BB0_30;\n\nld.shared.f32 %f64, [%r52+-4084];\nadd.ftz.f32 %f91, %f64, %f91;\n\n$L__BB0_30:\nadd.s32 %r23, %r53, 1;\nsetp.ge.s32 %p17, %r23, %r28;\n@%p17 bra $L__BB0_39;\n\nsetp.ge.s32 %p18, %r2, %r29;\n@%p18 bra $L__BB0_33;\n\nld.shared.f32 %f65, [%r52+-2048];\nadd.ftz.f32 %f94, %f65, %f94;\n\n$L__BB0_33:\nsetp.ge.s32 %p19, %r3, %r29;\n@%p19 bra $L__BB0_35;\n\nld.shared.f32 %f66, [%r52+-2044];\nadd.ftz.f32 %f93, %f66, %f93;\n\n$L__BB0_35:\nsetp.ge.s32 %p20, %r4, %r29;\n@%p20 bra $L__BB0_37;\n\nld.shared.f32 %f67, [%r52+-2040];\nadd.ftz.f32 %f92, %f67, %f92;\n\n$L__BB0_37:\nsetp.ge.s32 %p21, %r5, %r29;\n@%p21 bra $L__BB0_39;\n\nld.shared.f32 %f68, [%r52+-2036];\nadd.ftz.f32 %f91, %f68, %f91;\n\n$L__BB0_39:\nadd.s32 %r24, %r23, 1;\nsetp.ge.s32 %p22, %r24, %r28;\n@%p22 bra $L__BB0_48;\n\nsetp.ge.s32 %p23, %r2, %r29;\n@%p23 bra $L__BB0_42;\n\nld.shared.f32 %f69, [%r52];\nadd.ftz.f32 %f94, %f69, %f94;\n\n$L__BB0_42:\nsetp.ge.s32 %p24, %r3, %r29;\n@%p24 bra $L__BB0_44;\n\nld.shared.f32 %f70, [%r52+4];\nadd.ftz.f32 %f93, %f70, %f93;\n\n$L__BB0_44:\nsetp.ge.s32 %p25, %r4, %r29;\n@%p25 bra $L__BB0_46;\n\nld.shared.f32 %f71, [%r52+8];\nadd.ftz.f32 %f92, %f71, %f92;\n\n$L__BB0_46:\nsetp.ge.s32 %p26, %r5, %r29;\n@%p26 bra $L__BB0_48;\n\nld.shared.f32 %f72, [%r52+12];\nadd.ftz.f32 %f91, %f72, %f91;\n\n$L__BB0_48:\nadd.s32 %r25, %r24, 1;\nsetp.ge.s32 %p27, %r25, %r28;\n@%p27 bra $L__BB0_57;\n\nsetp.ge.s32 %p28, %r2, %r29;\n@%p28 bra $L__BB0_51;\n\nld.shared.f32 %f73, [%r52+2048];\nadd.ftz.f32 %f94, %f73, %f94;\n\n$L__BB0_51:\nsetp.ge.s32 %p29, %r3, %r29;\n@%p29 bra $L__BB0_53;\n\nld.shared.f32 %f74, [%r52+2052];\nadd.ftz.f32 %f93, %f74, %f93;\n\n$L__BB0_53:\nsetp.ge.s32 %p30, %r4, %r29;\n@%p30 bra $L__BB0_55;\n\nld.shared.f32 %f75, [%r52+2056];\nadd.ftz.f32 %f92, %f75, %f92;\n\n$L__BB0_55:\nsetp.ge.s32 %p31, %r5, %r29;\n@%p31 bra $L__BB0_57;\n\nld.shared.f32 %f76, [%r52+2060];\nadd.ftz.f32 %f91, %f76, %f91;\n\n$L__BB0_57:\nadd.s32 %r52, %r52, 8192;\nadd.s32 %r53, %r25, 1;\nsetp.ne.s32 %p32, %r53, 16;\n@%p32 bra $L__BB0_21;\n\nsetp.ge.s32 %p33, %r2, %r29;\nadd.s32 %r47, %r2, %r6;\nmul.wide.s32 %rd10, %r47, 4;\nadd.s64 %rd5, %rd4, %rd10;\n@%p33 bra $L__BB0_60;\n\nst.global.f32 [%rd5], %f94;\n\n$L__BB0_60:\nsetp.ge.s32 %p34, %r3, %r29;\n@%p34 bra $L__BB0_62;\n\nst.global.f32 [%rd5+4], %f93;\n\n$L__BB0_62:\nsetp.ge.s32 %p35, %r4, %r29;\n@%p35 bra $L__BB0_64;\n\nst.global.f32 [%rd5+8], %f92;\n\n$L__BB0_64:\nsetp.ge.s32 %p36, %r5, %r29;\n@%p36 bra $L__BB0_66;\n\nst.global.f32 [%rd5+12], %f91;\n\n$L__BB0_66:\nret;\n\n}",
+          "kernel": "_Z20sum_dim1_tile_kernelPKfPfiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002"
+          ],
+          "grid_dim": [
+            128,
+            8,
+            1
+          ],
+          "block_dim": [
+            128,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

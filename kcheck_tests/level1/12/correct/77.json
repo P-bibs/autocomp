@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_14258362_7_cuda_cu_a7fe080e4cuda3std3__439_GLOBAL__N__14258362_7_cuda_cu_a7fe080e6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_14258362_7_cuda_cu_a7fe080e4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_14258362_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_14258362_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_14258362_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_14258362_7_cuda_cu_a7fe080e6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z23fused_op_forward_kernelPKfS0_Pfii(\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_0,\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_1,\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_2,\n.param .u32 _Z23fused_op_forward_kernelPKfS0_Pfii_param_3,\n.param .u32 _Z23fused_op_forward_kernelPKfS0_Pfii_param_4\n)\n{\n.reg .pred %p<6>;\n.reg .f32 %f<20>;\n.reg .b32 %r<19>;\n.reg .b64 %rd<14>;\n\n\nld.param.u64 %rd5, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_0];\nld.param.u64 %rd6, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_1];\nld.param.u64 %rd7, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_2];\nld.param.u32 %r6, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_3];\nld.param.u32 %r5, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_4];\nadd.s32 %r7, %r5, 1023;\nshr.s32 %r8, %r7, 31;\nshr.u32 %r9, %r8, 22;\nadd.s32 %r10, %r7, %r9;\nshr.s32 %r1, %r10, 10;\nmov.u32 %r2, %ctaid.x;\ndiv.u32 %r3, %r2, %r1;\nsetp.ge.s32 %p1, %r3, %r6;\n@%p1 bra $L__BB0_9;\n\ncvta.to.global.u64 %rd8, %rd5;\nrem.u32 %r11, %r2, %r1;\nshl.b32 %r12, %r11, 10;\nmul.wide.s32 %rd9, %r3, 4;\nadd.s64 %rd10, %rd8, %rd9;\nld.global.nc.f32 %f1, [%rd10];\nmov.u32 %r13, %tid.x;\nshl.b32 %r14, %r13, 2;\nadd.s32 %r4, %r12, %r14;\nor.b32 %r15, %r4, 3;\nsetp.lt.s32 %p2, %r15, %r5;\nmad.lo.s32 %r16, %r3, %r5, %r4;\ncvta.to.global.u64 %rd11, %rd6;\nmul.wide.s32 %rd12, %r16, 4;\nadd.s64 %rd2, %rd11, %rd12;\ncvta.to.global.u64 %rd13, %rd7;\nadd.s64 %rd4, %rd13, %rd12;\n@%p2 bra $L__BB0_8;\nbra.uni $L__BB0_2;\n\n$L__BB0_8:\nld.global.nc.v4.f32 {%f8, %f9, %f10, %f11}, [%rd2];\nmul.ftz.f32 %f16, %f1, %f11;\nmul.ftz.f32 %f17, %f1, %f10;\nmul.ftz.f32 %f18, %f1, %f9;\nmul.ftz.f32 %f19, %f1, %f8;\nst.global.v4.f32 [%rd4], {%f19, %f18, %f17, %f16};\nbra.uni $L__BB0_9;\n\n$L__BB0_2:\nsetp.ge.s32 %p3, %r4, %r5;\n@%p3 bra $L__BB0_4;\n\nld.global.nc.f32 %f2, [%rd2];\nmul.ftz.f32 %f3, %f1, %f2;\nst.global.f32 [%rd4], %f3;\n\n$L__BB0_4:\nadd.s32 %r17, %r4, 1;\nsetp.ge.s32 %p4, %r17, %r5;\n@%p4 bra $L__BB0_6;\n\nld.global.nc.f32 %f4, [%rd2+4];\nmul.ftz.f32 %f5, %f1, %f4;\nst.global.f32 [%rd4+4], %f5;\n\n$L__BB0_6:\nadd.s32 %r18, %r4, 2;\nsetp.ge.s32 %p5, %r18, %r5;\n@%p5 bra $L__BB0_9;\n\nld.global.nc.f32 %f6, [%rd2+8];\nmul.ftz.f32 %f7, %f1, %f6;\nst.global.f32 [%rd4+8], %f7;\n\n$L__BB0_9:\nret;\n\n}",
+          "kernel": "_Z23fused_op_forward_kernelPKfS0_Pfii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            16384,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

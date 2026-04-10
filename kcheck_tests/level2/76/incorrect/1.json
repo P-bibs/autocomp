@@ -1,0 +1,64 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "gemm_weight": {
+      "size": 67108864
+    },
+    "bias": {
+      "size": 8192
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 8388608
+    }
+  },
+  "constants": {
+    "trace_const_000": 1024,
+    "trace_const_001": 8192
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "76_Gemm_Add_ReLU.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_b5f01a82_7_cuda_cu_1a1123714cuda3std3__439_GLOBAL__N__b5f01a82_7_cuda_cu_1a1123716ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b5f01a82_7_cuda_cu_1a1123714cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b5f01a82_7_cuda_cu_1a1123714cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b5f01a82_7_cuda_cu_1a1123714cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b5f01a82_7_cuda_cu_1a1123714cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b5f01a82_7_cuda_cu_1a1123716thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii(\n.param .u64 _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_0,\n.param .u64 _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_1,\n.param .u64 _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_2,\n.param .u64 _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_3,\n.param .u32 _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_4,\n.param .u32 _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_5,\n.param .u32 _Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_6\n)\n{\n.reg .pred %p<6>;\n.reg .f32 %f<20>;\n.reg .b32 %r<21>;\n.reg .b64 %rd<17>;\n//\n.shared .align 4 .b8 _ZZ24fused_linear_relu_kernelPKfS0_S0_PfiiiE6tile_x[1024];\n\nld.param.u64 %rd3, [_Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_0];\nld.param.u64 %rd4, [_Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_1];\nld.param.u64 %rd5, [_Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_2];\nld.param.u64 %rd6, [_Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_3];\nld.param.u32 %r11, [_Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_5];\nld.param.u32 %r12, [_Z24fused_linear_relu_kernelPKfS0_S0_Pfiii_param_6];\nmov.u32 %r1, %ctaid.x;\nmov.u32 %r2, %ntid.x;\nmov.u32 %r13, %ctaid.y;\nmov.u32 %r3, %tid.x;\nmad.lo.s32 %r4, %r13, %r2, %r3;\nsetp.ge.s32 %p1, %r4, %r12;\n@%p1 bra $L__BB0_9;\n\nsetp.lt.s32 %p2, %r11, 1;\nmov.f32 %f7, 0f00000000;\nmov.f32 %f18, %f7;\n@%p2 bra $L__BB0_8;\n\nmul.lo.s32 %r5, %r1, %r11;\nshl.b32 %r15, %r3, 2;\nmov.u32 %r16, _ZZ24fused_linear_relu_kernelPKfS0_S0_PfiiiE6tile_x;\nadd.s32 %r6, %r16, %r15;\nmul.lo.s32 %r7, %r4, %r11;\ncvta.to.global.u64 %rd1, %rd4;\ncvta.to.global.u64 %rd2, %rd3;\nmov.f32 %f8, 0f00000000;\nmov.u32 %r20, 0;\nmov.f32 %f18, %f8;\n\n$L__BB0_3:\nadd.s32 %r9, %r20, %r3;\nsetp.ge.s32 %p3, %r9, %r11;\nmov.f32 %f17, %f8;\n@%p3 bra $L__BB0_5;\n\nadd.s32 %r17, %r9, %r5;\nmul.wide.s32 %rd7, %r17, 4;\nadd.s64 %rd8, %rd2, %rd7;\nld.global.nc.f32 %f17, [%rd8];\n\n$L__BB0_5:\nst.shared.f32 [%r6], %f17;\nbar.sync 0;\n@%p3 bra $L__BB0_7;\n\nadd.s32 %r18, %r9, %r7;\nmul.wide.s32 %rd9, %r18, 4;\nadd.s64 %rd10, %rd1, %rd9;\nld.shared.f32 %f10, [%r6];\nld.global.nc.f32 %f11, [%rd10];\nfma.rn.ftz.f32 %f18, %f11, %f10, %f18;\n\n$L__BB0_7:\nbar.sync 0;\nadd.s32 %r20, %r20, %r2;\nsetp.lt.s32 %p5, %r20, %r11;\n@%p5 bra $L__BB0_3;\n\n$L__BB0_8:\ncvta.to.global.u64 %rd11, %rd5;\nmul.wide.s32 %rd12, %r4, 4;\nadd.s64 %rd13, %rd11, %rd12;\nld.global.nc.f32 %f12, [%rd13];\nadd.ftz.f32 %f13, %f18, %f12;\nmax.ftz.f32 %f15, %f13, %f7;\nmad.lo.s32 %r19, %r1, %r12, %r4;\ncvta.to.global.u64 %rd14, %rd6;\nmul.wide.s32 %rd15, %r19, 4;\nadd.s64 %rd16, %rd14, %rd15;\nst.global.f32 [%rd16], %f15;\n\n$L__BB0_9:\nret;\n\n}",
+          "kernel": "_Z24fused_linear_relu_kernelPKfS0_S0_Pfiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "gemm_weight",
+            "bias",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            1024,
+            32,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

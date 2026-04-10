@@ -1,0 +1,61 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "gemm_weight": {
+      "size": 67108864
+    },
+    "bias": {
+      "size": 8192
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 8388608
+    }
+  },
+  "constants": {
+    "trace_const_000": 1024,
+    "trace_const_001": 8192
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "76_Gemm_Add_ReLU.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_4933a4c4_7_cuda_cu_d124da444cuda3std3__439_GLOBAL__N__4933a4c4_7_cuda_cu_d124da446ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4933a4c4_7_cuda_cu_d124da444cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4933a4c4_7_cuda_cu_d124da444cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4933a4c4_7_cuda_cu_d124da444cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4933a4c4_7_cuda_cu_d124da444cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4933a4c4_7_cuda_cu_d124da446thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n.extern .shared .align 16 .b8 s_bias[];\n\n.visible .entry _Z23bias_relu_kernel_sharedPfPKfii(\n.param .u64 _Z23bias_relu_kernel_sharedPfPKfii_param_0,\n.param .u64 _Z23bias_relu_kernel_sharedPfPKfii_param_1,\n.param .u32 _Z23bias_relu_kernel_sharedPfPKfii_param_2,\n.param .u32 _Z23bias_relu_kernel_sharedPfPKfii_param_3\n)\n{\n.reg .pred %p<4>;\n.reg .f32 %f<6>;\n.reg .b32 %r<19>;\n.reg .b64 %rd<9>;\n\n\nld.param.u64 %rd2, [_Z23bias_relu_kernel_sharedPfPKfii_param_0];\nld.param.u64 %rd3, [_Z23bias_relu_kernel_sharedPfPKfii_param_1];\nld.param.u32 %r6, [_Z23bias_relu_kernel_sharedPfPKfii_param_2];\nld.param.u32 %r7, [_Z23bias_relu_kernel_sharedPfPKfii_param_3];\nmov.u32 %r1, %tid.x;\nsetp.lt.s32 %p1, %r1, %r7;\n@%p1 bra $L__BB0_1;\nbra.uni $L__BB0_3;\n\n$L__BB0_1:\nmov.u32 %r2, %ntid.x;\ncvta.to.global.u64 %rd1, %rd3;\nmov.u32 %r18, %r1;\n\n$L__BB0_2:\nmul.wide.s32 %rd4, %r18, 4;\nadd.s64 %rd5, %rd1, %rd4;\nld.global.f32 %f1, [%rd5];\nshl.b32 %r8, %r18, 2;\nmov.u32 %r9, s_bias;\nadd.s32 %r10, %r9, %r8;\nst.shared.f32 [%r10], %f1;\nadd.s32 %r18, %r18, %r2;\nsetp.lt.s32 %p2, %r18, %r7;\n@%p2 bra $L__BB0_2;\n\n$L__BB0_3:\nmov.u32 %r11, %ntid.x;\nbar.sync 0;\nmov.u32 %r12, %ctaid.x;\nmad.lo.s32 %r5, %r12, %r11, %r1;\nmul.lo.s32 %r13, %r7, %r6;\nsetp.ge.s32 %p3, %r5, %r13;\n@%p3 bra $L__BB0_5;\n\nrem.s32 %r14, %r5, %r7;\ncvta.to.global.u64 %rd6, %rd2;\nmul.wide.s32 %rd7, %r5, 4;\nadd.s64 %rd8, %rd6, %rd7;\nshl.b32 %r15, %r14, 2;\nmov.u32 %r16, s_bias;\nadd.s32 %r17, %r16, %r15;\nld.shared.f32 %f2, [%r17];\nld.global.f32 %f3, [%rd8];\nadd.ftz.f32 %f4, %f3, %f2;\nmax.ftz.f32 %f5, %f4, 0f00000000;\nst.global.f32 [%rd8], %f5;\n\n$L__BB0_5:\nret;\n\n}",
+          "kernel": "_Z23bias_relu_kernel_sharedPfPKfii",
+          "defines": {},
+          "arguments": [
+            "out",
+            "bias",
+            "trace_const_000",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            32768,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

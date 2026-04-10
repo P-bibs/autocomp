@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_e25f50f1_7_cuda_cu_b4fbeed44cuda3std3__439_GLOBAL__N__e25f50f1_7_cuda_cu_b4fbeed46ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e25f50f1_7_cuda_cu_b4fbeed44cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e25f50f1_7_cuda_cu_b4fbeed44cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e25f50f1_7_cuda_cu_b4fbeed44cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e25f50f1_7_cuda_cu_b4fbeed44cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_e25f50f1_7_cuda_cu_b4fbeed46thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z21fused_multiply_kernelPKfS0_Pfii(\n.param .u64 _Z21fused_multiply_kernelPKfS0_Pfii_param_0,\n.param .u64 _Z21fused_multiply_kernelPKfS0_Pfii_param_1,\n.param .u64 _Z21fused_multiply_kernelPKfS0_Pfii_param_2,\n.param .u32 _Z21fused_multiply_kernelPKfS0_Pfii_param_3,\n.param .u32 _Z21fused_multiply_kernelPKfS0_Pfii_param_4\n)\n{\n.reg .pred %p<4>;\n.reg .f32 %f<4>;\n.reg .b32 %r<11>;\n.reg .b64 %rd<26>;\n\n\nld.param.u64 %rd13, [_Z21fused_multiply_kernelPKfS0_Pfii_param_0];\nld.param.u64 %rd14, [_Z21fused_multiply_kernelPKfS0_Pfii_param_1];\nld.param.u64 %rd15, [_Z21fused_multiply_kernelPKfS0_Pfii_param_2];\nld.param.u32 %r1, [_Z21fused_multiply_kernelPKfS0_Pfii_param_3];\nld.param.u32 %r2, [_Z21fused_multiply_kernelPKfS0_Pfii_param_4];\ncvta.to.global.u64 %rd1, %rd15;\ncvta.to.global.u64 %rd2, %rd14;\ncvta.to.global.u64 %rd3, %rd13;\ncvt.s64.s32 %rd4, %r2;\nmul.wide.s32 %rd5, %r2, %r1;\nmov.u32 %r3, %ntid.x;\nmov.u32 %r4, %ctaid.x;\nmov.u32 %r5, %tid.x;\nmad.lo.s32 %r6, %r4, %r3, %r5;\ncvt.u64.u32 %rd24, %r6;\nmov.u32 %r7, %nctaid.x;\nmul.wide.u32 %rd7, %r3, %r7;\nsetp.le.u64 %p1, %rd5, %rd24;\n@%p1 bra $L__BB0_5;\n\n$L__BB0_1:\nor.b64 %rd16, %rd24, %rd4;\nand.b64 %rd17, %rd16, -4294967296;\nsetp.eq.s64 %p2, %rd17, 0;\n@%p2 bra $L__BB0_3;\n\ndiv.u64 %rd25, %rd24, %rd4;\nbra.uni $L__BB0_4;\n\n$L__BB0_3:\ncvt.u32.u64 %r8, %rd4;\ncvt.u32.u64 %r9, %rd24;\ndiv.u32 %r10, %r9, %r8;\ncvt.u64.u32 %rd25, %r10;\n\n$L__BB0_4:\nshl.b64 %rd18, %rd25, 32;\nshr.s64 %rd19, %rd18, 30;\nadd.s64 %rd20, %rd3, %rd19;\nshl.b64 %rd21, %rd24, 2;\nadd.s64 %rd22, %rd2, %rd21;\nld.global.nc.f32 %f1, [%rd22];\nld.global.nc.f32 %f2, [%rd20];\nmul.ftz.f32 %f3, %f2, %f1;\nadd.s64 %rd23, %rd1, %rd21;\nst.global.f32 [%rd23], %f3;\nadd.s64 %rd24, %rd24, %rd7;\nsetp.lt.u64 %p3, %rd24, %rd5;\n@%p3 bra $L__BB0_1;\n\n$L__BB0_5:\nret;\n\n}",
+          "kernel": "_Z21fused_multiply_kernelPKfS0_Pfii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            65535,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

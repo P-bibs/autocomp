@@ -1,0 +1,88 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 9437184
+    },
+    "conv_weight": {
+      "size": 1944
+    },
+    "conv_bias": {
+      "size": 24
+    },
+    "group_norm_weight": {
+      "size": 24
+    },
+    "group_norm_bias": {
+      "size": 24
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 128
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 3,
+    "trace_const_002": 24,
+    "trace_const_003": 32,
+    "trace_const_004": 1,
+    "trace_const_005": 0,
+    "trace_const_006": 8,
+    "trace_const_007": 1e-05
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "23_Conv3d_GroupNorm_Mean.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_9c01f69f_7_cuda_cu_31d6565b4cuda3std3__439_GLOBAL__N__9c01f69f_7_cuda_cu_31d6565b6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_9c01f69f_7_cuda_cu_31d6565b4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_9c01f69f_7_cuda_cu_31d6565b4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_9c01f69f_7_cuda_cu_31d6565b4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_9c01f69f_7_cuda_cu_31d6565b4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_9c01f69f_7_cuda_cu_31d6565b6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n.extern .shared .align 16 .b8 shared_data[];\n\n.visible .entry _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif(\n.param .u64 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_0,\n.param .u64 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_1,\n.param .u64 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_2,\n.param .u64 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_3,\n.param .u64 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_4,\n.param .u64 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_5,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_6,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_7,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_8,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_9,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_10,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_11,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_12,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_13,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_14,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_15,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_16,\n.param .u32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_17,\n.param .f32 _Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_18\n)\n{\n.reg .pred %p<39>;\n.reg .f32 %f<129>;\n.reg .b32 %r<187>;\n.reg .b64 %rd<47>;\n\n\nld.param.u64 %rd10, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_0];\nld.param.u64 %rd11, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_1];\nld.param.u64 %rd6, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_2];\nld.param.u32 %r79, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_6];\nld.param.u32 %r68, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_7];\nld.param.u32 %r69, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_8];\nld.param.u32 %r70, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_9];\nld.param.u32 %r71, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_10];\nld.param.u32 %r72, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_11];\nld.param.u32 %r73, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_12];\nld.param.u32 %r74, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_13];\nld.param.u32 %r75, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_14];\nld.param.u32 %r76, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_15];\nld.param.u32 %r77, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_16];\ncvta.to.global.u64 %rd1, %rd11;\ncvta.to.global.u64 %rd2, %rd10;\nmov.u32 %r2, %ctaid.x;\nsetp.ge.s32 %p2, %r2, %r79;\nmov.u32 %r3, %ctaid.y;\nsetp.ge.s32 %p3, %r3, %r72;\nor.pred %p4, %p2, %p3;\n@%p4 bra $L__BB0_44;\n\nshl.b32 %r81, %r75, 1;\nadd.s32 %r82, %r81, %r69;\nadd.s32 %r83, %r73, -1;\nmul.lo.s32 %r84, %r83, %r76;\nnot.b32 %r85, %r84;\nadd.s32 %r86, %r82, %r85;\ndiv.s32 %r4, %r86, %r74;\nadd.s32 %r87, %r81, %r70;\nadd.s32 %r88, %r87, %r85;\ndiv.s32 %r5, %r88, %r74;\nadd.s32 %r89, %r81, %r71;\nadd.s32 %r90, %r89, %r85;\ndiv.s32 %r6, %r90, %r74;\nsetp.lt.s32 %p5, %r4, 0;\nmov.u32 %r184, 0;\nmov.f32 %f123, 0f00000000;\nmov.f32 %f124, %f123;\n@%p5 bra $L__BB0_26;\n\ncvta.to.global.u64 %rd12, %rd6;\nmul.wide.s32 %rd13, %r3, 4;\nadd.s64 %rd3, %rd12, %rd13;\nmul.lo.s32 %r7, %r2, %r68;\nmul.lo.s32 %r8, %r7, %r69;\nmul.lo.s32 %r93, %r3, %r73;\nmul.lo.s32 %r9, %r93, %r73;\nmul.lo.s32 %r10, %r73, %r73;\nmul.lo.s32 %r94, %r73, %r10;\nshl.b32 %r11, %r94, 2;\nmul.lo.s32 %r95, %r71, %r70;\nmul.lo.s32 %r96, %r95, %r69;\nshl.b32 %r12, %r96, 2;\nmul.wide.s32 %rd4, %r96, 4;\nmul.wide.s32 %rd5, %r94, 4;\nmov.f32 %f124, 0f00000000;\nmov.u32 %r171, 0;\nmov.u32 %r184, %r171;\nmov.f32 %f123, %f124;\n\n$L__BB0_3:\nsetp.lt.s32 %p6, %r5, 0;\n@%p6 bra $L__BB0_25;\n\nmov.u32 %r173, 0;\n\n$L__BB0_5:\nsetp.lt.s32 %p7, %r6, 0;\n@%p7 bra $L__BB0_24;\n\nld.global.nc.f32 %f5, [%rd3];\nmov.u32 %r175, 0;\n\n$L__BB0_7:\nsetp.lt.s32 %p8, %r73, 1;\nmov.f32 %f120, 0f00000000;\n@%p8 bra $L__BB0_23;\n\nmov.f32 %f120, 0f00000000;\nmov.u32 %r177, 0;\n\n$L__BB0_9:\nmov.u32 %r178, 0;\n\n$L__BB0_10:\ndiv.s32 %r104, %r72, %r77;\ndiv.s32 %r27, %r3, %r104;\ndiv.s32 %r28, %r68, %r77;\nmul.lo.s32 %r29, %r28, %r27;\nadd.s32 %r30, %r29, %r28;\nsetp.lt.s32 %p9, %r28, 1;\n@%p9 bra $L__BB0_21;\n\nmul.lo.s32 %r164, %r171, %r74;\nsub.s32 %r163, %r164, %r75;\nmad.lo.s32 %r162, %r177, %r76, %r163;\nadd.s32 %r161, %r162, %r8;\nmul.lo.s32 %r152, %r173, %r74;\nsub.s32 %r151, %r152, %r75;\nmad.lo.s32 %r106, %r9, %r28, %r178;\nadd.s32 %r31, %r29, 1;\nmax.s32 %r107, %r30, %r31;\nsub.s32 %r108, %r107, %r29;\nnot.b32 %r109, %r29;\nadd.s32 %r32, %r107, %r109;\nand.b32 %r33, %r108, 3;\nmad.lo.s32 %r110, %r29, %r69, %r161;\nmad.lo.s32 %r43, %r178, %r76, %r151;\nmad.lo.s32 %r111, %r110, %r70, %r43;\nmul.lo.s32 %r34, %r111, %r71;\nmul.lo.s32 %r35, %r106, %r73;\nadd.s32 %r112, %r110, %r69;\nmad.lo.s32 %r113, %r112, %r70, %r43;\nmul.lo.s32 %r36, %r113, %r71;\nadd.s32 %r114, %r106, %r10;\nmul.lo.s32 %r37, %r114, %r73;\nadd.s32 %r115, %r112, %r69;\nmad.lo.s32 %r116, %r115, %r70, %r43;\nmul.lo.s32 %r39, %r116, %r71;\nadd.s32 %r117, %r114, %r10;\nmul.lo.s32 %r40, %r117, %r73;\nsub.s32 %r118, %r3, %r27;\nmul.lo.s32 %r42, %r28, %r118;\nsetp.lt.s32 %p10, %r43, %r70;\nsetp.lt.s32 %p11, %r162, %r69;\nor.b32 %r119, %r43, %r162;\nsetp.gt.s32 %p12, %r119, -1;\nand.pred %p13, %p11, %p12;\nand.pred %p1, %p10, %p13;\nmov.u32 %r179, 0;\n\n$L__BB0_12:\nmul.lo.s32 %r160, %r175, %r74;\nsub.s32 %r159, %r160, %r75;\nmul.lo.s32 %r153, %r177, %r10;\nmul.lo.s32 %r45, %r179, %r76;\nadd.s32 %r46, %r45, %r159;\nsetp.lt.s32 %p14, %r46, 0;\nnot.pred %p15, %p1;\nor.pred %p16, %p15, %p14;\nsetp.ge.s32 %p17, %r46, %r71;\nadd.s32 %r47, %r179, %r153;\nor.pred %p18, %p17, %p16;\n@%p18 bra $L__BB0_20;\n\nsetp.eq.s32 %p19, %r33, 0;\nmov.u32 %r180, %r29;\n@%p19 bra $L__BB0_17;\n\nadd.s32 %r180, %r29, 1;\nsetp.eq.s32 %p20, %r33, 1;\nadd.s32 %r120, %r34, %r46;\nmul.wide.s32 %rd14, %r120, 4;\nadd.s64 %rd15, %rd2, %rd14;\nadd.s32 %r121, %r47, %r35;\nmul.wide.s32 %rd16, %r121, 4;\nadd.s64 %rd17, %rd1, %rd16;\nld.global.nc.f32 %f36, [%rd17];\nld.global.nc.f32 %f37, [%rd15];\nfma.rn.ftz.f32 %f120, %f37, %f36, %f120;\n@%p20 bra $L__BB0_17;\n\nadd.s32 %r180, %r29, 2;\nsetp.eq.s32 %p21, %r33, 2;\nadd.s32 %r122, %r36, %r46;\nmul.wide.s32 %rd18, %r122, 4;\nadd.s64 %rd19, %rd2, %rd18;\nadd.s32 %r123, %r47, %r37;\nmul.wide.s32 %rd20, %r123, 4;\nadd.s64 %rd21, %rd1, %rd20;\nld.global.nc.f32 %f38, [%rd21];\nld.global.nc.f32 %f39, [%rd19];\nfma.rn.ftz.f32 %f120, %f39, %f38, %f120;\n@%p21 bra $L__BB0_17;\n\nadd.s32 %r180, %r29, 3;\nadd.s32 %r124, %r39, %r46;\nmul.wide.s32 %rd22, %r124, 4;\nadd.s64 %rd23, %rd2, %rd22;\nadd.s32 %r125, %r47, %r40;\nmul.wide.s32 %rd24, %r125, 4;\nadd.s64 %rd25, %rd1, %rd24;\nld.global.nc.f32 %f40, [%rd25];\nld.global.nc.f32 %f41, [%rd23];\nfma.rn.ftz.f32 %f120, %f41, %f40, %f120;\n\n$L__BB0_17:\nsetp.lt.u32 %p22, %r32, 3;\n@%p22 bra $L__BB0_20;\n\nmul.lo.s32 %r170, %r179, %r76;\nmul.lo.s32 %r169, %r171, %r74;\nsub.s32 %r168, %r169, %r75;\nmad.lo.s32 %r167, %r177, %r76, %r168;\nmul.lo.s32 %r166, %r175, %r74;\nsub.s32 %r165, %r166, %r75;\nmul.lo.s32 %r158, %r173, %r74;\nmad.lo.s32 %r157, %r178, %r76, %r151;\nadd.s32 %r126, %r42, %r180;\nmad.lo.s32 %r127, %r73, %r126, %r177;\nmad.lo.s32 %r128, %r73, %r127, %r178;\nmad.lo.s32 %r182, %r73, %r128, %r179;\nadd.s32 %r129, %r7, %r180;\nmad.lo.s32 %r130, %r69, %r129, %r167;\nmad.lo.s32 %r131, %r70, %r130, %r157;\nadd.s32 %r132, %r165, %r170;\nmad.lo.s32 %r181, %r71, %r131, %r132;\n\n$L__BB0_19:\nmul.wide.s32 %rd26, %r181, 4;\nadd.s64 %rd27, %rd2, %rd26;\nmul.wide.s32 %rd28, %r182, 4;\nadd.s64 %rd29, %rd1, %rd28;\nld.global.nc.f32 %f42, [%rd29];\nld.global.nc.f32 %f43, [%rd27];\nfma.rn.ftz.f32 %f44, %f43, %f42, %f120;\nadd.s64 %rd30, %rd27, %rd4;\nadd.s64 %rd31, %rd29, %rd5;\nld.global.nc.f32 %f45, [%rd31];\nld.global.nc.f32 %f46, [%rd30];\nfma.rn.ftz.f32 %f47, %f46, %f45, %f44;\nadd.s64 %rd32, %rd30, %rd4;\nadd.s64 %rd33, %rd31, %rd5;\nld.global.nc.f32 %f48, [%rd33];\nld.global.nc.f32 %f49, [%rd32];\nfma.rn.ftz.f32 %f50, %f49, %f48, %f47;\nadd.s64 %rd34, %rd32, %rd4;\nadd.s64 %rd35, %rd33, %rd5;\nld.global.nc.f32 %f51, [%rd35];\nld.global.nc.f32 %f52, [%rd34];\nfma.rn.ftz.f32 %f120, %f52, %f51, %f50;\nadd.s32 %r182, %r182, %r11;\nadd.s32 %r181, %r181, %r12;\nadd.s32 %r180, %r180, 4;\nsetp.lt.s32 %p23, %r180, %r30;\n@%p23 bra $L__BB0_19;\n\n$L__BB0_20:\nadd.s32 %r179, %r179, 1;\nsetp.lt.s32 %p24, %r179, %r73;\n@%p24 bra $L__BB0_12;\n\n$L__BB0_21:\nadd.s32 %r178, %r178, 1;\nsetp.lt.s32 %p25, %r178, %r73;\n@%p25 bra $L__BB0_10;\n\nadd.s32 %r177, %r177, 1;\nsetp.lt.s32 %p26, %r177, %r73;\n@%p26 bra $L__BB0_9;\n\n$L__BB0_23:\nadd.ftz.f32 %f53, %f120, %f5;\nadd.ftz.f32 %f123, %f123, %f53;\nfma.rn.ftz.f32 %f124, %f53, %f53, %f124;\nadd.s32 %r184, %r184, 1;\nadd.s32 %r61, %r175, 1;\nsetp.lt.s32 %p27, %r175, %r6;\nmov.u32 %r175, %r61;\n@%p27 bra $L__BB0_7;\n\n$L__BB0_24:\nadd.s32 %r63, %r173, 1;\nsetp.lt.s32 %p28, %r173, %r5;\nmov.u32 %r173, %r63;\n@%p28 bra $L__BB0_5;\n\n$L__BB0_25:\nadd.s32 %r65, %r171, 1;\nsetp.lt.s32 %p29, %r171, %r4;\nmov.u32 %r171, %r65;\n@%p29 bra $L__BB0_3;\n\n$L__BB0_26:\nmov.u32 %r137, %tid.x;\nshl.b32 %r133, %r137, 2;\nmov.u32 %r134, shared_data;\nadd.s32 %r67, %r134, %r133;\nst.shared.f32 [%r67], %f123;\nst.shared.f32 [%r67+1024], %f124;\nbar.sync 0;\nsetp.gt.s32 %p30, %r137, 127;\n@%p30 bra $L__BB0_28;\n\nld.shared.f32 %f54, [%r67];\nld.shared.f32 %f55, [%r67+512];\nadd.ftz.f32 %f56, %f55, %f54;\nst.shared.f32 [%r67], %f56;\nld.shared.f32 %f57, [%r67+1024];\nld.shared.f32 %f58, [%r67+1536];\nadd.ftz.f32 %f59, %f58, %f57;\nst.shared.f32 [%r67+1024], %f59;\n\n$L__BB0_28:\nmov.u32 %r138, %tid.x;\nbar.sync 0;\nsetp.gt.s32 %p31, %r138, 63;\n@%p31 bra $L__BB0_30;\n\nld.shared.f32 %f60, [%r67];\nld.shared.f32 %f61, [%r67+256];\nadd.ftz.f32 %f62, %f61, %f60;\nst.shared.f32 [%r67], %f62;\nld.shared.f32 %f63, [%r67+1024];\nld.shared.f32 %f64, [%r67+1280];\nadd.ftz.f32 %f65, %f64, %f63;\nst.shared.f32 [%r67+1024], %f65;\n\n$L__BB0_30:\nmov.u32 %r139, %tid.x;\nbar.sync 0;\nsetp.gt.s32 %p32, %r139, 31;\n@%p32 bra $L__BB0_32;\n\nld.shared.f32 %f66, [%r67];\nld.shared.f32 %f67, [%r67+128];\nadd.ftz.f32 %f68, %f67, %f66;\nst.shared.f32 [%r67], %f68;\nld.shared.f32 %f69, [%r67+1024];\nld.shared.f32 %f70, [%r67+1152];\nadd.ftz.f32 %f71, %f70, %f69;\nst.shared.f32 [%r67+1024], %f71;\n\n$L__BB0_32:\nmov.u32 %r140, %tid.x;\nbar.sync 0;\nsetp.gt.s32 %p33, %r140, 15;\n@%p33 bra $L__BB0_34;\n\nld.shared.f32 %f72, [%r67];\nld.shared.f32 %f73, [%r67+64];\nadd.ftz.f32 %f74, %f73, %f72;\nst.shared.f32 [%r67], %f74;\nld.shared.f32 %f75, [%r67+1024];\nld.shared.f32 %f76, [%r67+1088];\nadd.ftz.f32 %f77, %f76, %f75;\nst.shared.f32 [%r67+1024], %f77;\n\n$L__BB0_34:\nmov.u32 %r141, %tid.x;\nbar.sync 0;\nsetp.gt.s32 %p34, %r141, 7;\n@%p34 bra $L__BB0_36;\n\nld.shared.f32 %f78, [%r67];\nld.shared.f32 %f79, [%r67+32];\nadd.ftz.f32 %f80, %f79, %f78;\nst.shared.f32 [%r67], %f80;\nld.shared.f32 %f81, [%r67+1024];\nld.shared.f32 %f82, [%r67+1056];\nadd.ftz.f32 %f83, %f82, %f81;\nst.shared.f32 [%r67+1024], %f83;\n\n$L__BB0_36:\nmov.u32 %r142, %tid.x;\nbar.sync 0;\nsetp.gt.s32 %p35, %r142, 3;\n@%p35 bra $L__BB0_38;\n\nld.shared.f32 %f84, [%r67];\nld.shared.f32 %f85, [%r67+16];\nadd.ftz.f32 %f86, %f85, %f84;\nst.shared.f32 [%r67], %f86;\nld.shared.f32 %f87, [%r67+1024];\nld.shared.f32 %f88, [%r67+1040];\nadd.ftz.f32 %f89, %f88, %f87;\nst.shared.f32 [%r67+1024], %f89;\n\n$L__BB0_38:\nmov.u32 %r143, %tid.x;\nbar.sync 0;\nsetp.gt.s32 %p36, %r143, 1;\n@%p36 bra $L__BB0_40;\n\nld.shared.f32 %f90, [%r67];\nld.shared.f32 %f91, [%r67+8];\nadd.ftz.f32 %f92, %f91, %f90;\nst.shared.f32 [%r67], %f92;\nld.shared.f32 %f93, [%r67+1024];\nld.shared.f32 %f94, [%r67+1032];\nadd.ftz.f32 %f95, %f94, %f93;\nst.shared.f32 [%r67+1024], %f95;\n\n$L__BB0_40:\nmov.u32 %r144, %tid.x;\nbar.sync 0;\nsetp.gt.s32 %p37, %r144, 0;\n@%p37 bra $L__BB0_42;\n\nld.shared.f32 %f96, [%r67];\nld.shared.f32 %f97, [%r67+4];\nadd.ftz.f32 %f98, %f97, %f96;\nst.shared.f32 [%r67], %f98;\nld.shared.f32 %f99, [%r67+1024];\nld.shared.f32 %f100, [%r67+1028];\nadd.ftz.f32 %f101, %f100, %f99;\nst.shared.f32 [%r67+1024], %f101;\n\n$L__BB0_42:\nmov.u32 %r145, %tid.x;\nbar.sync 0;\nsetp.ne.s32 %p38, %r145, 0;\n@%p38 bra $L__BB0_44;\n\nld.param.u64 %rd46, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_5];\nld.param.u64 %rd45, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_4];\nld.param.u64 %rd44, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_3];\nld.param.u32 %r147, [_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif_param_17];\nmov.u32 %r146, %ctaid.x;\nld.shared.f32 %f102, [shared_data];\ncvt.rn.f32.s32 %f103, %r184;\ndiv.approx.ftz.f32 %f104, %f102, %f103;\ndiv.s32 %r135, %r72, %r147;\ndiv.s32 %r136, %r3, %r135;\ncvta.to.global.u64 %rd36, %rd44;\nmul.wide.s32 %rd37, %r136, 4;\nadd.s64 %rd38, %rd36, %rd37;\nld.global.nc.f32 %f105, [%rd38];\ncvta.to.global.u64 %rd39, %rd45;\nadd.s64 %rd40, %rd39, %rd37;\nld.global.nc.f32 %f106, [%rd40];\nfma.rn.ftz.f32 %f107, %f104, %f105, %f106;\ncvta.to.global.u64 %rd41, %rd46;\nmul.wide.s32 %rd42, %r146, 4;\nadd.s64 %rd43, %rd41, %rd42;\nst.global.f32 [%rd43], %f107;\n\n$L__BB0_44:\nret;\n\n}",
+          "kernel": "_Z27fused_conv3d_gn_mean_kernelPKfS0_S0_S0_S0_Pfiiiiiiiiiiiif",
+          "defines": {},
+          "arguments": [
+            "x",
+            "conv_weight",
+            "conv_bias",
+            "group_norm_weight",
+            "group_norm_bias",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_003",
+            "trace_const_003",
+            "trace_const_002",
+            "trace_const_001",
+            "trace_const_004",
+            "trace_const_005",
+            "trace_const_004",
+            "trace_const_004",
+            "trace_const_006",
+            "trace_const_007"
+          ],
+          "grid_dim": [
+            128,
+            24,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

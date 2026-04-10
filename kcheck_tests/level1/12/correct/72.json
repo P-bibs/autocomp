@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_b823459b_7_cuda_cu_a7fe080e4cuda3std3__439_GLOBAL__N__b823459b_7_cuda_cu_a7fe080e6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b823459b_7_cuda_cu_a7fe080e4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b823459b_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b823459b_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b823459b_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_b823459b_7_cuda_cu_a7fe080e6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z23fused_op_forward_kernelPKfS0_Pfii(\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_0,\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_1,\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_2,\n.param .u32 _Z23fused_op_forward_kernelPKfS0_Pfii_param_3,\n.param .u32 _Z23fused_op_forward_kernelPKfS0_Pfii_param_4\n)\n{\n.reg .pred %p<12>;\n.reg .f32 %f<22>;\n.reg .b32 %r<45>;\n.reg .b64 %rd<22>;\n\n\nld.param.u64 %rd12, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_0];\nld.param.u64 %rd13, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_1];\nld.param.u64 %rd14, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_2];\nld.param.u32 %r10, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_3];\nld.param.u32 %r11, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_4];\nmov.u32 %r1, %ntid.x;\nmov.u32 %r12, %ctaid.x;\nmov.u32 %r13, %tid.x;\nmad.lo.s32 %r14, %r12, %r1, %r13;\nshl.b32 %r2, %r14, 2;\nmul.lo.s32 %r15, %r11, %r10;\nsetp.ge.s32 %p1, %r2, %r15;\n@%p1 bra $L__BB0_17;\n\nadd.s32 %r44, %r2, 2;\nmov.u32 %r16, %nctaid.x;\nmul.lo.s32 %r17, %r16, %r1;\nshl.b32 %r18, %r17, 2;\nmul.wide.s32 %rd1, %r18, 4;\ncvta.to.global.u64 %rd20, %rd13;\ncvta.to.global.u64 %rd21, %rd14;\ncvta.to.global.u64 %rd15, %rd12;\n\n$L__BB0_2:\nadd.s32 %r5, %r44, -2;\ndiv.s32 %r6, %r5, %r11;\nmul.wide.s32 %rd16, %r6, 4;\nadd.s64 %rd17, %rd15, %rd16;\nld.global.nc.f32 %f1, [%rd17];\nadd.s32 %r7, %r44, 1;\nsetp.ge.s32 %p2, %r7, %r15;\nmul.wide.s32 %rd18, %r2, 4;\nadd.s64 %rd6, %rd20, %rd18;\nadd.s64 %rd7, %rd21, %rd18;\n@%p2 bra $L__BB0_4;\n\ndiv.s32 %r25, %r7, %r11;\nsetp.eq.s32 %p3, %r25, %r6;\n@%p3 bra $L__BB0_15;\nbra.uni $L__BB0_4;\n\n$L__BB0_15:\nld.global.nc.v4.f32 {%f10, %f11, %f12, %f13}, [%rd6];\nmul.ftz.f32 %f18, %f1, %f13;\nmul.ftz.f32 %f19, %f1, %f12;\nmul.ftz.f32 %f20, %f1, %f11;\nmul.ftz.f32 %f21, %f1, %f10;\nst.global.v4.f32 [%rd7], {%f21, %f20, %f19, %f18};\nbra.uni $L__BB0_16;\n\n$L__BB0_4:\nsetp.ge.s32 %p4, %r5, %r15;\n@%p4 bra $L__BB0_6;\n\nld.global.nc.f32 %f2, [%rd6];\nmul.ftz.f32 %f3, %f1, %f2;\nst.global.f32 [%rd7], %f3;\n\n$L__BB0_6:\nadd.s32 %r8, %r44, -1;\nsetp.ge.s32 %p5, %r8, %r15;\nor.b32 %r33, %r2, 1;\nmul.wide.s32 %rd19, %r33, 4;\nadd.s64 %rd8, %rd20, %rd19;\nadd.s64 %rd9, %rd21, %rd19;\n@%p5 bra $L__BB0_9;\n\ndiv.s32 %r34, %r8, %r11;\nsetp.ne.s32 %p6, %r34, %r6;\n@%p6 bra $L__BB0_9;\n\nld.global.nc.f32 %f4, [%rd8];\nmul.ftz.f32 %f5, %f1, %f4;\nst.global.f32 [%rd9], %f5;\n\n$L__BB0_9:\nsetp.ge.s32 %p7, %r44, %r15;\n@%p7 bra $L__BB0_12;\n\ndiv.s32 %r36, %r44, %r11;\nsetp.ne.s32 %p8, %r36, %r6;\n@%p8 bra $L__BB0_12;\n\nld.global.nc.f32 %f6, [%rd8+4];\nmul.ftz.f32 %f7, %f1, %f6;\nst.global.f32 [%rd9+4], %f7;\n\n$L__BB0_12:\n@%p2 bra $L__BB0_16;\n\ndiv.s32 %r38, %r7, %r11;\nsetp.ne.s32 %p10, %r38, %r6;\n@%p10 bra $L__BB0_16;\n\nld.global.nc.f32 %f8, [%rd8+8];\nmul.ftz.f32 %f9, %f1, %f8;\nst.global.f32 [%rd9+8], %f9;\n\n$L__BB0_16:\nadd.s64 %rd21, %rd21, %rd1;\nadd.s64 %rd20, %rd20, %rd1;\nshl.b32 %r40, %r16, 2;\nmad.lo.s32 %r44, %r40, %r1, %r44;\nadd.s32 %r42, %r44, -2;\nsetp.lt.s32 %p11, %r42, %r15;\n@%p11 bra $L__BB0_2;\n\n$L__BB0_17:\nret;\n\n}",
+          "kernel": "_Z23fused_op_forward_kernelPKfS0_Pfii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            16384,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

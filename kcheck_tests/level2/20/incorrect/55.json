@@ -1,0 +1,38 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "conv_transpose_weight": {
+      "size": 55296
+    },
+    "conv_transpose_bias": {
+      "size": 64
+    },
+    "bias": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 134217728
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "20_ConvTranspose3d_Sum_ResidualAdd_Multiply_ResidualAdd.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": []
+    }
+  ],
+  "expected_result": "equivalent"
+}

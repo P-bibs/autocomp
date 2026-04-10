@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_40a4347d_7_cuda_cu_7529eb034cuda3std3__439_GLOBAL__N__40a4347d_7_cuda_cu_7529eb036ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_40a4347d_7_cuda_cu_7529eb034cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_40a4347d_7_cuda_cu_7529eb034cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_40a4347d_7_cuda_cu_7529eb034cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_40a4347d_7_cuda_cu_7529eb034cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_40a4347d_7_cuda_cu_7529eb036thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z22vector_multiply_kernelPKfS0_Pfii(\n.param .u64 _Z22vector_multiply_kernelPKfS0_Pfii_param_0,\n.param .u64 _Z22vector_multiply_kernelPKfS0_Pfii_param_1,\n.param .u64 _Z22vector_multiply_kernelPKfS0_Pfii_param_2,\n.param .u32 _Z22vector_multiply_kernelPKfS0_Pfii_param_3,\n.param .u32 _Z22vector_multiply_kernelPKfS0_Pfii_param_4\n)\n{\n.reg .pred %p<7>;\n.reg .f32 %f<62>;\n.reg .b32 %r<28>;\n.reg .b64 %rd<31>;\n\n\nld.param.u64 %rd16, [_Z22vector_multiply_kernelPKfS0_Pfii_param_0];\nld.param.u64 %rd17, [_Z22vector_multiply_kernelPKfS0_Pfii_param_1];\nld.param.u64 %rd18, [_Z22vector_multiply_kernelPKfS0_Pfii_param_2];\nld.param.u32 %r13, [_Z22vector_multiply_kernelPKfS0_Pfii_param_3];\nld.param.u32 %r12, [_Z22vector_multiply_kernelPKfS0_Pfii_param_4];\nmov.u32 %r14, %ctaid.x;\nmov.u32 %r15, %ntid.x;\nmov.u32 %r16, %tid.x;\nmad.lo.s32 %r1, %r14, %r15, %r16;\nsetp.ge.s32 %p1, %r1, %r13;\n@%p1 bra $L__BB0_8;\n\ncvta.to.global.u64 %rd19, %rd16;\ncvta.to.global.u64 %rd1, %rd17;\ncvta.to.global.u64 %rd2, %rd18;\nmul.wide.s32 %rd20, %r1, 4;\nadd.s64 %rd21, %rd19, %rd20;\nld.global.nc.f32 %f1, [%rd21];\nmul.lo.s32 %r17, %r1, %r12;\ncvt.s64.s32 %rd3, %r17;\nshr.s32 %r18, %r12, 31;\nshr.u32 %r19, %r18, 30;\nadd.s32 %r20, %r12, %r19;\nshr.s32 %r2, %r20, 2;\nsetp.lt.s32 %p2, %r12, 4;\n@%p2 bra $L__BB0_8;\n\nadd.s32 %r22, %r2, -1;\nand.b32 %r27, %r2, 3;\nsetp.lt.u32 %p3, %r22, 3;\nmov.u32 %r26, 0;\n@%p3 bra $L__BB0_5;\n\nsub.s32 %r25, %r2, %r27;\nshl.b64 %rd22, %rd3, 2;\nadd.s64 %rd23, %rd22, 32;\nadd.s64 %rd28, %rd2, %rd23;\nadd.s64 %rd27, %rd1, %rd23;\nmov.u32 %r26, 0;\n\n$L__BB0_4:\n.pragma \"nounroll\";\nld.global.nc.v4.f32 {%f2, %f3, %f4, %f5}, [%rd27+-32];\nmul.ftz.f32 %f10, %f1, %f5;\nmul.ftz.f32 %f11, %f1, %f4;\nmul.ftz.f32 %f12, %f1, %f3;\nmul.ftz.f32 %f13, %f1, %f2;\nst.global.v4.f32 [%rd28+-32], {%f13, %f12, %f11, %f10};\nld.global.nc.v4.f32 {%f14, %f15, %f16, %f17}, [%rd27+-16];\nmul.ftz.f32 %f22, %f1, %f17;\nmul.ftz.f32 %f23, %f1, %f16;\nmul.ftz.f32 %f24, %f1, %f15;\nmul.ftz.f32 %f25, %f1, %f14;\nst.global.v4.f32 [%rd28+-16], {%f25, %f24, %f23, %f22};\nld.global.nc.v4.f32 {%f26, %f27, %f28, %f29}, [%rd27];\nmul.ftz.f32 %f34, %f1, %f29;\nmul.ftz.f32 %f35, %f1, %f28;\nmul.ftz.f32 %f36, %f1, %f27;\nmul.ftz.f32 %f37, %f1, %f26;\nst.global.v4.f32 [%rd28], {%f37, %f36, %f35, %f34};\nld.global.nc.v4.f32 {%f38, %f39, %f40, %f41}, [%rd27+16];\nmul.ftz.f32 %f46, %f1, %f41;\nmul.ftz.f32 %f47, %f1, %f40;\nmul.ftz.f32 %f48, %f1, %f39;\nmul.ftz.f32 %f49, %f1, %f38;\nst.global.v4.f32 [%rd28+16], {%f49, %f48, %f47, %f46};\nadd.s32 %r26, %r26, 4;\nadd.s64 %rd28, %rd28, 64;\nadd.s64 %rd27, %rd27, 64;\nadd.s32 %r25, %r25, -4;\nsetp.ne.s32 %p4, %r25, 0;\n@%p4 bra $L__BB0_4;\n\n$L__BB0_5:\nsetp.eq.s32 %p5, %r27, 0;\n@%p5 bra $L__BB0_8;\n\nmul.wide.s32 %rd24, %r26, 4;\nadd.s64 %rd25, %rd24, %rd3;\nshl.b64 %rd26, %rd25, 2;\nadd.s64 %rd30, %rd1, %rd26;\nadd.s64 %rd29, %rd2, %rd26;\n\n$L__BB0_7:\n.pragma \"nounroll\";\nld.global.nc.v4.f32 {%f50, %f51, %f52, %f53}, [%rd30];\nmul.ftz.f32 %f58, %f1, %f53;\nmul.ftz.f32 %f59, %f1, %f52;\nmul.ftz.f32 %f60, %f1, %f51;\nmul.ftz.f32 %f61, %f1, %f50;\nst.global.v4.f32 [%rd29], {%f61, %f60, %f59, %f58};\nadd.s64 %rd30, %rd30, 16;\nadd.s64 %rd29, %rd29, 16;\nadd.s32 %r27, %r27, -1;\nsetp.ne.s32 %p6, %r27, 0;\n@%p6 bra $L__BB0_7;\n\n$L__BB0_8:\nret;\n\n}",
+          "kernel": "_Z22vector_multiply_kernelPKfS0_Pfii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            16,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

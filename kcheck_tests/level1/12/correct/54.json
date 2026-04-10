@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_38350912_7_cuda_cu_34a2860e4cuda3std3__439_GLOBAL__N__38350912_7_cuda_cu_34a2860e6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_38350912_7_cuda_cu_34a2860e4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_38350912_7_cuda_cu_34a2860e4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_38350912_7_cuda_cu_34a2860e4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_38350912_7_cuda_cu_34a2860e4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_38350912_7_cuda_cu_34a2860e6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z31broadcast_mul_vectorized_kernelPKfS0_Pfii(\n.param .u64 _Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_0,\n.param .u64 _Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_1,\n.param .u64 _Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_2,\n.param .u32 _Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_3,\n.param .u32 _Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_4\n)\n{\n.reg .pred %p<9>;\n.reg .f32 %f<6>;\n.reg .b32 %r<20>;\n.reg .b64 %rd<13>;\n//\n.shared .align 4 .b8 _ZZ31broadcast_mul_vectorized_kernelPKfS0_PfiiE6A_tile[64];\n//\n.shared .align 4 .b8 _ZZ31broadcast_mul_vectorized_kernelPKfS0_PfiiE6B_tile[1088];\n\nld.param.u64 %rd1, [_Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_0];\nld.param.u64 %rd2, [_Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_1];\nld.param.u64 %rd3, [_Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_2];\nld.param.u32 %r7, [_Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_3];\nld.param.u32 %r8, [_Z31broadcast_mul_vectorized_kernelPKfS0_Pfii_param_4];\nmov.u32 %r9, %ctaid.y;\nshl.b32 %r10, %r9, 4;\nmov.u32 %r1, %tid.y;\nadd.s32 %r2, %r10, %r1;\nmov.u32 %r11, %ctaid.x;\nshl.b32 %r12, %r11, 4;\nmov.u32 %r3, %tid.x;\nadd.s32 %r4, %r12, %r3;\nsetp.ne.s32 %p2, %r3, 0;\nsetp.ge.s32 %p3, %r2, %r7;\nshl.b32 %r13, %r1, 2;\nmov.u32 %r14, _ZZ31broadcast_mul_vectorized_kernelPKfS0_PfiiE6A_tile;\nadd.s32 %r5, %r14, %r13;\nor.pred %p4, %p2, %p3;\n@%p4 bra $L__BB0_2;\n\ncvta.to.global.u64 %rd4, %rd1;\nmul.wide.s32 %rd5, %r2, 4;\nadd.s64 %rd6, %rd4, %rd5;\nld.global.nc.f32 %f1, [%rd6];\nst.shared.f32 [%r5], %f1;\n\n$L__BB0_2:\nsetp.lt.s32 %p5, %r2, %r7;\nbar.sync 0;\nsetp.lt.s32 %p6, %r4, %r8;\nand.pred %p1, %p5, %p6;\nmov.u32 %r15, _ZZ31broadcast_mul_vectorized_kernelPKfS0_PfiiE6B_tile;\nmad.lo.s32 %r16, %r1, 68, %r15;\nshl.b32 %r17, %r3, 2;\nadd.s32 %r6, %r16, %r17;\nnot.pred %p7, %p1;\n@%p7 bra $L__BB0_4;\n\nmad.lo.s32 %r18, %r2, %r8, %r4;\ncvta.to.global.u64 %rd7, %rd2;\nmul.wide.s32 %rd8, %r18, 4;\nadd.s64 %rd9, %rd7, %rd8;\nld.global.nc.f32 %f2, [%rd9];\nst.shared.f32 [%r6], %f2;\n\n$L__BB0_4:\nbar.sync 0;\n@%p7 bra $L__BB0_6;\n\nld.shared.f32 %f3, [%r5];\nld.shared.f32 %f4, [%r6];\nmul.ftz.f32 %f5, %f3, %f4;\nmad.lo.s32 %r19, %r2, %r8, %r4;\ncvta.to.global.u64 %rd10, %rd3;\nmul.wide.s32 %rd11, %r19, 4;\nadd.s64 %rd12, %rd10, %rd11;\nst.global.f32 [%rd12], %f5;\n\n$L__BB0_6:\nret;\n\n}",
+          "kernel": "_Z31broadcast_mul_vectorized_kernelPKfS0_Pfii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            256,
+            256,
+            1
+          ],
+          "block_dim": [
+            16,
+            16,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

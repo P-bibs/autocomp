@@ -1,0 +1,57 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.const .align 4 .b8 const_A[16384];\n.global .align 1 .b8 _ZN37_INTERNAL_1053b619_7_cuda_cu_c62976604cuda3std3__439_GLOBAL__N__1053b619_7_cuda_cu_c62976606ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_1053b619_7_cuda_cu_c62976604cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_1053b619_7_cuda_cu_c62976604cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_1053b619_7_cuda_cu_c62976604cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_1053b619_7_cuda_cu_c62976604cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_1053b619_7_cuda_cu_c62976606thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z16row_scale_kernelIfEvPKT_PS0_ii(\n.param .u64 _Z16row_scale_kernelIfEvPKT_PS0_ii_param_0,\n.param .u64 _Z16row_scale_kernelIfEvPKT_PS0_ii_param_1,\n.param .u32 _Z16row_scale_kernelIfEvPKT_PS0_ii_param_2,\n.param .u32 _Z16row_scale_kernelIfEvPKT_PS0_ii_param_3\n)\n{\n.reg .pred %p<4>;\n.reg .f32 %f<4>;\n.reg .b32 %r<9>;\n.reg .b64 %rd<14>;\n\n\nld.param.u64 %rd4, [_Z16row_scale_kernelIfEvPKT_PS0_ii_param_0];\nld.param.u64 %rd5, [_Z16row_scale_kernelIfEvPKT_PS0_ii_param_1];\nld.param.u32 %r7, [_Z16row_scale_kernelIfEvPKT_PS0_ii_param_2];\nld.param.u32 %r6, [_Z16row_scale_kernelIfEvPKT_PS0_ii_param_3];\nmov.u32 %r1, %ctaid.x;\nsetp.ge.s32 %p1, %r1, %r7;\n@%p1 bra $L__BB0_4;\n\nmov.u32 %r8, %tid.x;\nsetp.ge.s32 %p2, %r8, %r6;\n@%p2 bra $L__BB0_4;\n\nmul.wide.s32 %rd6, %r1, 4;\nmov.u64 %rd7, const_A;\nadd.s64 %rd8, %rd7, %rd6;\nld.const.f32 %f1, [%rd8];\nmov.u32 %r3, %ntid.x;\ncvta.to.global.u64 %rd1, %rd5;\ncvta.to.global.u64 %rd2, %rd4;\nmul.wide.s32 %rd3, %r6, %r1;\n\n$L__BB0_3:\ncvt.s64.s32 %rd9, %r8;\nadd.s64 %rd10, %rd3, %rd9;\nshl.b64 %rd11, %rd10, 2;\nadd.s64 %rd12, %rd2, %rd11;\nld.global.nc.f32 %f2, [%rd12];\nmul.ftz.f32 %f3, %f1, %f2;\nadd.s64 %rd13, %rd1, %rd11;\nst.global.f32 [%rd13], %f3;\nadd.s32 %r8, %r8, %r3;\nsetp.lt.s32 %p3, %r8, %r6;\n@%p3 bra $L__BB0_3;\n\n$L__BB0_4:\nret;\n\n}",
+          "kernel": "_Z16row_scale_kernelIfEvPKT_PS0_ii",
+          "defines": {},
+          "arguments": [
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            4096,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,75 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 67108864
+    },
+    "conv_weight": {
+      "size": 3456
+    },
+    "conv_bias": {
+      "size": 16
+    },
+    "bias": {
+      "size": 16
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 128
+    }
+  },
+  "constants": {
+    "trace_const_000": 2.0,
+    "trace_const_001": 128,
+    "trace_const_002": 8,
+    "trace_const_003": 16,
+    "trace_const_004": 64
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "8_Conv3d_Divide_Max_GlobalAvgPool_BiasAdd_Sum.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_4f582304_7_cuda_cu_076c1db34cuda3std3__439_GLOBAL__N__4f582304_7_cuda_cu_076c1db36ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4f582304_7_cuda_cu_076c1db34cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4f582304_7_cuda_cu_076c1db34cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4f582304_7_cuda_cu_076c1db34cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4f582304_7_cuda_cu_076c1db34cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4f582304_7_cuda_cu_076c1db36thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii(\n.param .u64 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_0,\n.param .u64 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_1,\n.param .u64 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_2,\n.param .u64 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_3,\n.param .u64 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_4,\n.param .f32 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_5,\n.param .u32 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_6,\n.param .u32 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_7,\n.param .u32 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_8,\n.param .u32 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_9,\n.param .u32 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_10,\n.param .u32 _Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_11\n)\n{\n.reg .pred %p<7>;\n.reg .f32 %f<31>;\n.reg .b32 %r<24>;\n.reg .b64 %rd<15>;\n\n\nld.param.u64 %rd8, [_Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_3];\nld.param.u64 %rd7, [_Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_4];\nld.param.f32 %f8, [_Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_5];\nld.param.u32 %r12, [_Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_6];\nld.param.u32 %r11, [_Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii_param_8];\ncvta.to.global.u64 %rd1, %rd8;\nmov.u32 %r13, %ntid.x;\nmov.u32 %r14, %ctaid.x;\nmov.u32 %r15, %tid.x;\nmad.lo.s32 %r1, %r14, %r13, %r15;\nmul.lo.s32 %r16, %r11, %r12;\nsetp.ge.s32 %p1, %r1, %r16;\n@%p1 bra $L__BB0_9;\n\nsetp.lt.s32 %p2, %r11, 1;\nmov.f32 %f30, 0f00000000;\n@%p2 bra $L__BB0_8;\n\nadd.s32 %r18, %r11, -1;\nand.b32 %r23, %r11, 3;\nsetp.lt.u32 %p3, %r18, 3;\nmov.f32 %f30, 0f00000000;\nmov.u32 %r22, 0;\n@%p3 bra $L__BB0_5;\n\nsub.s32 %r21, %r11, %r23;\nmov.f32 %f30, 0f00000000;\nmov.u32 %r22, 0;\nmov.u64 %rd13, %rd1;\n\n$L__BB0_4:\nld.global.nc.f32 %f13, [%rd13];\ndiv.approx.ftz.f32 %f14, %f13, %f8;\nadd.ftz.f32 %f15, %f30, %f14;\nld.global.nc.f32 %f16, [%rd13+4];\ndiv.approx.ftz.f32 %f17, %f16, %f8;\nadd.ftz.f32 %f18, %f15, %f17;\nld.global.nc.f32 %f19, [%rd13+8];\ndiv.approx.ftz.f32 %f20, %f19, %f8;\nadd.ftz.f32 %f21, %f18, %f20;\nld.global.nc.f32 %f22, [%rd13+12];\ndiv.approx.ftz.f32 %f23, %f22, %f8;\nadd.ftz.f32 %f30, %f21, %f23;\nadd.s32 %r22, %r22, 4;\nadd.s64 %rd13, %rd13, 16;\nadd.s32 %r21, %r21, -4;\nsetp.ne.s32 %p4, %r21, 0;\n@%p4 bra $L__BB0_4;\n\n$L__BB0_5:\nsetp.eq.s32 %p5, %r23, 0;\n@%p5 bra $L__BB0_8;\n\nmul.wide.s32 %rd9, %r22, 4;\nadd.s64 %rd14, %rd1, %rd9;\n\n$L__BB0_7:\n.pragma \"nounroll\";\nld.global.nc.f32 %f24, [%rd14];\ndiv.approx.ftz.f32 %f25, %f24, %f8;\nadd.ftz.f32 %f30, %f30, %f25;\nadd.s64 %rd14, %rd14, 4;\nadd.s32 %r23, %r23, -1;\nsetp.ne.s32 %p6, %r23, 0;\n@%p6 bra $L__BB0_7;\n\n$L__BB0_8:\ncvta.to.global.u64 %rd10, %rd7;\nmul.wide.s32 %rd11, %r1, 4;\nadd.s64 %rd12, %rd10, %rd11;\nst.global.f32 [%rd12], %f30;\n\n$L__BB0_9:\nret;\n\n}",
+          "kernel": "_Z25fused_conv_pool_op_kernelPKfS0_S0_S0_Pffiiiiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "conv_weight",
+            "conv_bias",
+            "bias",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_003",
+            "trace_const_003",
+            "trace_const_004",
+            "trace_const_004"
+          ],
+          "grid_dim": [
+            8,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,61 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "gemm_weight": {
+      "size": 67108864
+    },
+    "bias": {
+      "size": 8192
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 8388608
+    }
+  },
+  "constants": {
+    "trace_const_000": 1024,
+    "trace_const_001": 8192
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "76_Gemm_Add_ReLU.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_36493c83_7_cuda_cu_56d341364cuda3std3__439_GLOBAL__N__36493c83_7_cuda_cu_56d341366ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_36493c83_7_cuda_cu_56d341364cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_36493c83_7_cuda_cu_56d341364cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_36493c83_7_cuda_cu_56d341364cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_36493c83_7_cuda_cu_56d341364cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_36493c83_7_cuda_cu_56d341366thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z16bias_relu_kernelPfPKfii(\n.param .u64 _Z16bias_relu_kernelPfPKfii_param_0,\n.param .u64 _Z16bias_relu_kernelPfPKfii_param_1,\n.param .u32 _Z16bias_relu_kernelPfPKfii_param_2,\n.param .u32 _Z16bias_relu_kernelPfPKfii_param_3\n)\n{\n.reg .pred %p<2>;\n.reg .f32 %f<5>;\n.reg .b32 %r<9>;\n.reg .b64 %rd<9>;\n\n\nld.param.u64 %rd1, [_Z16bias_relu_kernelPfPKfii_param_0];\nld.param.u64 %rd2, [_Z16bias_relu_kernelPfPKfii_param_1];\nld.param.u32 %r3, [_Z16bias_relu_kernelPfPKfii_param_2];\nld.param.u32 %r2, [_Z16bias_relu_kernelPfPKfii_param_3];\nmov.u32 %r4, %ctaid.x;\nmov.u32 %r5, %ntid.x;\nmov.u32 %r6, %tid.x;\nmad.lo.s32 %r1, %r4, %r5, %r6;\nmul.lo.s32 %r7, %r2, %r3;\nsetp.ge.s32 %p1, %r1, %r7;\n@%p1 bra $L__BB0_2;\n\ncvta.to.global.u64 %rd3, %rd1;\nmul.wide.s32 %rd4, %r1, 4;\nadd.s64 %rd5, %rd3, %rd4;\nrem.s32 %r8, %r1, %r2;\ncvta.to.global.u64 %rd6, %rd2;\nmul.wide.s32 %rd7, %r8, 4;\nadd.s64 %rd8, %rd6, %rd7;\nld.global.f32 %f1, [%rd8];\nld.global.f32 %f2, [%rd5];\nadd.ftz.f32 %f3, %f2, %f1;\nmax.ftz.f32 %f4, %f3, 0f00000000;\nst.global.f32 [%rd5], %f4;\n\n$L__BB0_2:\nret;\n\n}",
+          "kernel": "_Z16bias_relu_kernelPfPKfii",
+          "defines": {},
+          "arguments": [
+            "out",
+            "bias",
+            "trace_const_000",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            32768,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

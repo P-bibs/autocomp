@@ -1,0 +1,55 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 524160,
+    "trace_const_001": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_Max_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_abf379f8_7_cuda_cu_a323f1034cuda3std3__439_GLOBAL__N__abf379f8_7_cuda_cu_a323f1036ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_abf379f8_7_cuda_cu_a323f1034cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_abf379f8_7_cuda_cu_a323f1034cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_abf379f8_7_cuda_cu_a323f1034cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_abf379f8_7_cuda_cu_a323f1034cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_abf379f8_7_cuda_cu_a323f1036thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii(\n.param .u64 _Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_0,\n.param .u64 _Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_1,\n.param .u32 _Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_2,\n.param .u32 _Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_3\n)\n{\n.reg .pred %p<16>;\n.reg .b32 %r<42>;\n.reg .f64 %fd<27>;\n.reg .b64 %rd<14>;\n//\n.shared .align 8 .b8 _ZZ26max_reduce_last_dim_kernelIdEvPKT_PS0_iiE6s_data[256];\n\nld.param.u64 %rd4, [_Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_0];\nld.param.u64 %rd5, [_Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_1];\nld.param.u32 %r13, [_Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_2];\nld.param.u32 %r12, [_Z26max_reduce_last_dim_kernelIdEvPKT_PS0_ii_param_3];\nmov.u32 %r1, %ctaid.x;\nsetp.ge.s32 %p1, %r1, %r13;\n@%p1 bra $L__BB0_16;\n\ncvt.s64.s32 %rd1, %r1;\nmov.u32 %r2, %tid.x;\nsetp.ge.s32 %p2, %r2, %r12;\nmov.f64 %fd23, 0dFFF0000000000000;\n@%p2 bra $L__BB0_4;\n\nmov.u32 %r3, %ntid.x;\ncvta.to.global.u64 %rd2, %rd4;\ncvt.s64.s32 %rd6, %r12;\nmul.lo.s64 %rd3, %rd6, %rd1;\nmov.f64 %fd23, 0dFFF0000000000000;\nmov.u32 %r39, %r2;\n\n$L__BB0_3:\ncvt.s64.s32 %rd7, %r39;\nadd.s64 %rd8, %rd3, %rd7;\nshl.b64 %rd9, %rd8, 3;\nadd.s64 %rd10, %rd2, %rd9;\nld.global.nc.f64 %fd14, [%rd10];\nmax.f64 %fd23, %fd23, %fd14;\nadd.s32 %r39, %r39, %r3;\nsetp.lt.s32 %p3, %r39, %r12;\n@%p3 bra $L__BB0_3;\n\n$L__BB0_4:\nmov.u32 %r41, WARP_SZ;\nsetp.lt.s32 %p4, %r41, 2;\n@%p4 bra $L__BB0_7;\n\nmov.u32 %r40, %r41;\n\n$L__BB0_6:\n//\nmov.b64 {%r14,%r15}, %fd23;\n//\nshr.u32 %r18, %r40, 31;\nadd.s32 %r19, %r40, %r18;\nshr.s32 %r8, %r19, 1;\nmov.u32 %r20, 31;\nmov.u32 %r21, -1;\nshfl.sync.bfly.b32 %r17|%p5, %r15, %r8, %r20, %r21;\nshfl.sync.bfly.b32 %r16|%p6, %r14, %r8, %r20, %r21;\n//\nmov.b64 %fd16, {%r16,%r17};\n//\nmax.f64 %fd23, %fd23, %fd16;\nsetp.gt.s32 %p7, %r40, 3;\nmov.u32 %r40, %r8;\n@%p7 bra $L__BB0_6;\n\n$L__BB0_7:\nrem.u32 %r9, %r2, %r41;\nsetp.ne.s32 %p8, %r9, 0;\n@%p8 bra $L__BB0_9;\n\ndiv.u32 %r22, %r2, %r41;\nshl.b32 %r23, %r22, 3;\nmov.u32 %r24, _ZZ26max_reduce_last_dim_kernelIdEvPKT_PS0_iiE6s_data;\nadd.s32 %r25, %r24, %r23;\nst.shared.f64 [%r25], %fd23;\n\n$L__BB0_9:\nbar.sync 0;\nsetp.le.u32 %p9, %r41, %r2;\n@%p9 bra $L__BB0_16;\n\nmov.u32 %r26, %ntid.x;\ndiv.u32 %r27, %r26, %r41;\nsetp.ge.u32 %p10, %r2, %r27;\nmov.f64 %fd26, 0dFFF0000000000000;\n@%p10 bra $L__BB0_12;\n\nshl.b32 %r28, %r9, 3;\nmov.u32 %r29, _ZZ26max_reduce_last_dim_kernelIdEvPKT_PS0_iiE6s_data;\nadd.s32 %r30, %r29, %r28;\nld.shared.f64 %fd26, [%r30];\n\n$L__BB0_12:\n@%p4 bra $L__BB0_14;\n\n$L__BB0_13:\n//\nmov.b64 {%r31,%r32}, %fd26;\n//\nshr.u32 %r35, %r41, 31;\nadd.s32 %r36, %r41, %r35;\nshr.s32 %r11, %r36, 1;\nmov.u32 %r37, 31;\nmov.u32 %r38, -1;\nshfl.sync.bfly.b32 %r34|%p12, %r32, %r11, %r37, %r38;\nshfl.sync.bfly.b32 %r33|%p13, %r31, %r11, %r37, %r38;\n//\nmov.b64 %fd19, {%r33,%r34};\n//\nmax.f64 %fd26, %fd26, %fd19;\nsetp.gt.s32 %p14, %r41, 3;\nmov.u32 %r41, %r11;\n@%p14 bra $L__BB0_13;\n\n$L__BB0_14:\nsetp.ne.s32 %p15, %r2, 0;\n@%p15 bra $L__BB0_16;\n\ncvta.to.global.u64 %rd11, %rd5;\nshl.b64 %rd12, %rd1, 3;\nadd.s64 %rd13, %rd11, %rd12;\nst.global.f64 [%rd13], %fd26;\n\n$L__BB0_16:\nret;\n\n}\n//\n.visible .entry _Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii(\n.param .u64 _Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_0,\n.param .u64 _Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_1,\n.param .u32 _Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_2,\n.param .u32 _Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_3\n)\n{\n.reg .pred %p<14>;\n.reg .f32 %f<25>;\n.reg .b32 %r<38>;\n.reg .b64 %rd<14>;\n//\n.shared .align 4 .b8 _ZZ26max_reduce_last_dim_kernelIfEvPKT_PS0_iiE6s_data[128];\n\nld.param.u64 %rd4, [_Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_0];\nld.param.u64 %rd5, [_Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_1];\nld.param.u32 %r13, [_Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_2];\nld.param.u32 %r12, [_Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii_param_3];\nmov.u32 %r1, %ctaid.x;\nsetp.ge.s32 %p1, %r1, %r13;\n@%p1 bra $L__BB1_16;\n\ncvt.s64.s32 %rd1, %r1;\nmov.u32 %r2, %tid.x;\nsetp.ge.s32 %p2, %r2, %r12;\nmov.f32 %f21, 0fFF800000;\n@%p2 bra $L__BB1_4;\n\nmov.u32 %r3, %ntid.x;\ncvta.to.global.u64 %rd2, %rd4;\ncvt.s64.s32 %rd6, %r12;\nmul.lo.s64 %rd3, %rd6, %rd1;\nmov.f32 %f21, 0fFF800000;\nmov.u32 %r35, %r2;\n\n$L__BB1_3:\ncvt.s64.s32 %rd7, %r35;\nadd.s64 %rd8, %rd3, %rd7;\nshl.b64 %rd9, %rd8, 2;\nadd.s64 %rd10, %rd2, %rd9;\nld.global.nc.f32 %f14, [%rd10];\nmax.ftz.f32 %f21, %f21, %f14;\nadd.s32 %r35, %r35, %r3;\nsetp.lt.s32 %p3, %r35, %r12;\n@%p3 bra $L__BB1_3;\n\n$L__BB1_4:\nmov.u32 %r37, WARP_SZ;\nsetp.lt.s32 %p4, %r37, 2;\n@%p4 bra $L__BB1_7;\n\nmov.u32 %r36, %r37;\n\n$L__BB1_6:\nmov.b32 %r14, %f21;\nshr.u32 %r15, %r36, 31;\nadd.s32 %r16, %r36, %r15;\nshr.s32 %r8, %r16, 1;\nmov.u32 %r17, 31;\nmov.u32 %r18, -1;\nshfl.sync.bfly.b32 %r19|%p5, %r14, %r8, %r17, %r18;\nmov.b32 %f15, %r19;\nmax.ftz.f32 %f21, %f21, %f15;\nsetp.gt.s32 %p6, %r36, 3;\nmov.u32 %r36, %r8;\n@%p6 bra $L__BB1_6;\n\n$L__BB1_7:\nrem.u32 %r9, %r2, %r37;\nsetp.ne.s32 %p7, %r9, 0;\n@%p7 bra $L__BB1_9;\n\ndiv.u32 %r20, %r2, %r37;\nshl.b32 %r21, %r20, 2;\nmov.u32 %r22, _ZZ26max_reduce_last_dim_kernelIfEvPKT_PS0_iiE6s_data;\nadd.s32 %r23, %r22, %r21;\nst.shared.f32 [%r23], %f21;\n\n$L__BB1_9:\nbar.sync 0;\nsetp.le.u32 %p8, %r37, %r2;\n@%p8 bra $L__BB1_16;\n\nmov.u32 %r24, %ntid.x;\ndiv.u32 %r25, %r24, %r37;\nsetp.ge.u32 %p9, %r2, %r25;\nmov.f32 %f24, 0fFF800000;\n@%p9 bra $L__BB1_12;\n\nshl.b32 %r26, %r9, 2;\nmov.u32 %r27, _ZZ26max_reduce_last_dim_kernelIfEvPKT_PS0_iiE6s_data;\nadd.s32 %r28, %r27, %r26;\nld.shared.f32 %f24, [%r28];\n\n$L__BB1_12:\n@%p4 bra $L__BB1_14;\n\n$L__BB1_13:\nmov.b32 %r29, %f24;\nshr.u32 %r30, %r37, 31;\nadd.s32 %r31, %r37, %r30;\nshr.s32 %r11, %r31, 1;\nmov.u32 %r32, 31;\nmov.u32 %r33, -1;\nshfl.sync.bfly.b32 %r34|%p11, %r29, %r11, %r32, %r33;\nmov.b32 %f17, %r34;\nmax.ftz.f32 %f24, %f24, %f17;\nsetp.gt.s32 %p12, %r37, 3;\nmov.u32 %r37, %r11;\n@%p12 bra $L__BB1_13;\n\n$L__BB1_14:\nsetp.ne.s32 %p13, %r2, 0;\n@%p13 bra $L__BB1_16;\n\ncvta.to.global.u64 %rd11, %rd5;\nshl.b64 %rd12, %rd1, 2;\nadd.s64 %rd13, %rd11, %rd12;\nst.global.f32 [%rd13], %f24;\n\n$L__BB1_16:\nret;\n\n}",
+          "kernel": "_Z26max_reduce_last_dim_kernelIfEvPKT_PS0_ii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            524160,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,79 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "conv_transpose_weight": {
+      "size": 55296
+    },
+    "conv_transpose_bias": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 134217728
+    }
+  },
+  "constants": {
+    "trace_const_000": 1,
+    "trace_const_001": 32,
+    "trace_const_002": 16,
+    "trace_const_003": 64,
+    "trace_const_004": 3,
+    "trace_const_005": 2,
+    "trace_const_006": 31,
+    "trace_const_007": 63
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_ConvTranspose3d_Softmax_Sigmoid.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_a54aad16_7_cuda_cu_53545d704cuda3std3__439_GLOBAL__N__a54aad16_7_cuda_cu_53545d706ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a54aad16_7_cuda_cu_53545d704cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a54aad16_7_cuda_cu_53545d704cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a54aad16_7_cuda_cu_53545d704cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a54aad16_7_cuda_cu_53545d704cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a54aad16_7_cuda_cu_53545d706thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii(\n.param .u64 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_0,\n.param .u64 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_1,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_2,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_3,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_4,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_5,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_6,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_7,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_8,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_9,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_10,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_11,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_12,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_13,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_14,\n.param .u32 _Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_15\n)\n{\n.reg .pred %p<2>;\n.reg .f32 %f<6>;\n.reg .b32 %r<14>;\n.reg .b64 %rd<5>;\n\n\nld.param.u64 %rd1, [_Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_1];\nld.param.u32 %r2, [_Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_2];\nld.param.u32 %r3, [_Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_7];\nld.param.u32 %r4, [_Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_13];\nld.param.u32 %r5, [_Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_14];\nld.param.u32 %r6, [_Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii_param_15];\nmov.u32 %r7, %ctaid.x;\nmov.u32 %r8, %ntid.x;\nmov.u32 %r9, %tid.x;\nmad.lo.s32 %r1, %r7, %r8, %r9;\nmul.lo.s32 %r10, %r3, %r2;\nmul.lo.s32 %r11, %r10, %r4;\nmul.lo.s32 %r12, %r11, %r5;\nmul.lo.s32 %r13, %r12, %r6;\nsetp.ge.s32 %p1, %r1, %r13;\n@%p1 bra $L__BB0_2;\n\ncvta.to.global.u64 %rd2, %rd1;\nmul.wide.s32 %rd3, %r1, 4;\nadd.s64 %rd4, %rd2, %rd3;\nld.global.f32 %f1, [%rd4];\nmul.ftz.f32 %f2, %f1, 0fBFB8AA3B;\nex2.approx.ftz.f32 %f3, %f2;\nadd.ftz.f32 %f4, %f3, 0f3F800000;\nrcp.approx.ftz.f32 %f5, %f4;\nst.global.f32 [%rd4], %f5;\n\n$L__BB0_2:\nret;\n\n}",
+          "kernel": "_Z20fused_compute_kernelPKfPfiiiiiiiiiiiiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_001",
+            "trace_const_001",
+            "trace_const_003",
+            "trace_const_004",
+            "trace_const_004",
+            "trace_const_004",
+            "trace_const_005",
+            "trace_const_000",
+            "trace_const_006",
+            "trace_const_007",
+            "trace_const_007"
+          ],
+          "grid_dim": [
+            524288,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

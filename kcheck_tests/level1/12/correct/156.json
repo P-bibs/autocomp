@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_61b51a0c_7_cuda_cu_a7fe080e4cuda3std3__439_GLOBAL__N__61b51a0c_7_cuda_cu_a7fe080e6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_61b51a0c_7_cuda_cu_a7fe080e4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_61b51a0c_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_61b51a0c_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_61b51a0c_7_cuda_cu_a7fe080e4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_61b51a0c_7_cuda_cu_a7fe080e6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z23fused_op_forward_kernelPKfS0_Pfii(\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_0,\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_1,\n.param .u64 _Z23fused_op_forward_kernelPKfS0_Pfii_param_2,\n.param .u32 _Z23fused_op_forward_kernelPKfS0_Pfii_param_3,\n.param .u32 _Z23fused_op_forward_kernelPKfS0_Pfii_param_4\n)\n{\n.reg .pred %p<5>;\n.reg .f32 %f<17>;\n.reg .b32 %r<27>;\n.reg .b64 %rd<17>;\n\n\nld.param.u64 %rd4, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_0];\nld.param.u64 %rd5, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_1];\nld.param.u64 %rd6, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_2];\nld.param.u32 %r13, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_3];\nld.param.u32 %r12, [_Z23fused_op_forward_kernelPKfS0_Pfii_param_4];\ncvta.to.global.u64 %rd1, %rd6;\ncvta.to.global.u64 %rd2, %rd5;\ncvta.to.global.u64 %rd3, %rd4;\nmov.u32 %r1, %ntid.x;\nmov.u32 %r14, %ctaid.x;\nmov.u32 %r15, %tid.x;\nmad.lo.s32 %r2, %r14, %r1, %r15;\nmul.lo.s32 %r3, %r12, %r13;\nshr.s32 %r16, %r3, 31;\nshr.u32 %r17, %r16, 30;\nadd.s32 %r18, %r3, %r17;\nshr.s32 %r4, %r18, 2;\nsetp.ge.s32 %p1, %r2, %r4;\n@%p1 bra $L__BB0_3;\n\nmov.u32 %r19, %nctaid.x;\nmul.lo.s32 %r5, %r1, %r19;\nmov.u32 %r25, %r2;\n\n$L__BB0_2:\nshl.b32 %r20, %r25, 2;\ndiv.s32 %r21, %r20, %r12;\nmul.wide.s32 %rd7, %r21, 4;\nadd.s64 %rd8, %rd3, %rd7;\nmul.wide.s32 %rd9, %r20, 4;\nadd.s64 %rd10, %rd2, %rd9;\nld.global.nc.v4.f32 {%f1, %f2, %f3, %f4}, [%rd10];\nld.global.nc.f32 %f9, [%rd8];\nadd.s64 %rd11, %rd1, %rd9;\nmul.ftz.f32 %f10, %f9, %f4;\nmul.ftz.f32 %f11, %f9, %f3;\nmul.ftz.f32 %f12, %f9, %f2;\nmul.ftz.f32 %f13, %f9, %f1;\nst.global.v4.f32 [%rd11], {%f13, %f12, %f11, %f10};\nadd.s32 %r25, %r25, %r5;\nsetp.lt.s32 %p2, %r25, %r4;\n@%p2 bra $L__BB0_2;\n\n$L__BB0_3:\nshl.b32 %r22, %r4, 2;\nadd.s32 %r26, %r22, %r2;\nsetp.ge.s32 %p3, %r26, %r3;\n@%p3 bra $L__BB0_6;\n\nmov.u32 %r23, %nctaid.x;\nmul.lo.s32 %r9, %r1, %r23;\n\n$L__BB0_5:\ndiv.s32 %r24, %r26, %r12;\nmul.wide.s32 %rd12, %r24, 4;\nadd.s64 %rd13, %rd3, %rd12;\nmul.wide.s32 %rd14, %r26, 4;\nadd.s64 %rd15, %rd2, %rd14;\nld.global.nc.f32 %f14, [%rd15];\nld.global.nc.f32 %f15, [%rd13];\nmul.ftz.f32 %f16, %f15, %f14;\nadd.s64 %rd16, %rd1, %rd14;\nst.global.f32 [%rd16], %f16;\nadd.s32 %r26, %r26, %r9;\nsetp.lt.s32 %p4, %r26, %r3;\n@%p4 bra $L__BB0_5;\n\n$L__BB0_6:\nret;\n\n}",
+          "kernel": "_Z23fused_op_forward_kernelPKfS0_Pfii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            16384,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

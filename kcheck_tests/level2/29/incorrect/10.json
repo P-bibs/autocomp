@@ -1,0 +1,64 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "linear_weight": {
+      "size": 67108864
+    },
+    "linear_bias": {
+      "size": 8192
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 8388608
+    }
+  },
+  "constants": {
+    "trace_const_000": 1024,
+    "trace_const_001": 8192
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "29_Matmul_Mish_Mish.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_becf5920_7_cuda_cu_f92e48a74cuda3std3__439_GLOBAL__N__becf5920_7_cuda_cu_f92e48a76ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_becf5920_7_cuda_cu_f92e48a74cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_becf5920_7_cuda_cu_f92e48a74cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_becf5920_7_cuda_cu_f92e48a74cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_becf5920_7_cuda_cu_f92e48a74cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_becf5920_7_cuda_cu_f92e48a76thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii(\n.param .u64 _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_0,\n.param .u64 _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_1,\n.param .u64 _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_2,\n.param .u64 _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_3,\n.param .u32 _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_4,\n.param .u32 _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_5,\n.param .u32 _Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_6\n)\n{\n.reg .pred %p<15>;\n.reg .f32 %f<136>;\n.reg .b32 %r<44>;\n.reg .b64 %rd<33>;\n.loc\t1 26 0\n\n\nld.param.u64 %rd17, [_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_0];\nld.param.u64 %rd18, [_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_1];\nld.param.u64 %rd15, [_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_2];\nld.param.u64 %rd16, [_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_3];\nld.param.u32 %r16, [_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_4];\nld.param.u32 %r14, [_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_5];\nld.param.u32 %r15, [_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii_param_6];\n.loc\t1 36 5\ncvta.to.global.u64 %rd1, %rd18;\ncvta.to.global.u64 %rd2, %rd17;\n.loc\t1 37 5\nmov.u32 %r17, %ntid.x;\nmov.u32 %r18, %ctaid.y;\nmov.u32 %r19, %tid.x;\nmad.lo.s32 %r1, %r18, %r17, %r19;\n.loc\t1 36 5\nmov.u32 %r2, %ctaid.x;\n.loc\t1 39 5\nsetp.ge.s32 %p1, %r2, %r16;\nsetp.ge.s32 %p2, %r1, %r15;\nor.pred %p3, %p1, %p2;\n@%p3 bra $L__BB0_17;\n\n.loc\t1 46 5\nsetp.lt.s32 %p4, %r14, 1;\nmov.f32 %f131, 0f00000000;\n@%p4 bra $L__BB0_8;\n\nadd.s32 %r21, %r14, -1;\nand.b32 %r43, %r14, 3;\nsetp.lt.u32 %p5, %r21, 3;\nmov.f32 %f131, 0f00000000;\nmov.u32 %r42, 0;\n@%p5 bra $L__BB0_5;\n\nsub.s32 %r41, %r14, %r43;\nmul.lo.s32 %r23, %r2, %r14;\nmul.wide.s32 %rd19, %r23, 4;\nadd.s64 %rd29, %rd2, %rd19;\nmul.lo.s32 %r24, %r14, %r1;\nmul.wide.s32 %rd4, %r24, 4;\nmov.f32 %f131, 0f00000000;\nmov.u32 %r42, 0;\nmov.u64 %rd30, %rd1;\n\n$L__BB0_4:\n.loc\t1 47 9\nadd.s64 %rd20, %rd30, %rd4;\nld.global.nc.f32 %f26, [%rd20];\nld.global.nc.f32 %f27, [%rd29];\nfma.rn.ftz.f32 %f28, %f27, %f26, %f131;\nld.global.nc.f32 %f29, [%rd20+4];\nld.global.nc.f32 %f30, [%rd29+4];\nfma.rn.ftz.f32 %f31, %f30, %f29, %f28;\nld.global.nc.f32 %f32, [%rd20+8];\nld.global.nc.f32 %f33, [%rd29+8];\nfma.rn.ftz.f32 %f34, %f33, %f32, %f31;\nld.global.nc.f32 %f35, [%rd20+12];\nld.global.nc.f32 %f36, [%rd29+12];\nfma.rn.ftz.f32 %f131, %f36, %f35, %f34;\n.loc\t1 46 38\nadd.s32 %r42, %r42, 4;\n.loc\t1 46 5\nadd.s64 %rd30, %rd30, 16;\nadd.s64 %rd29, %rd29, 16;\nadd.s32 %r41, %r41, -4;\nsetp.ne.s32 %p6, %r41, 0;\n@%p6 bra $L__BB0_4;\n\n$L__BB0_5:\nsetp.eq.s32 %p7, %r43, 0;\n@%p7 bra $L__BB0_8;\n\nmad.lo.s32 %r25, %r14, %r1, %r42;\nmul.wide.s32 %rd21, %r25, 4;\nadd.s64 %rd32, %rd1, %rd21;\nmad.lo.s32 %r26, %r2, %r14, %r42;\nmul.wide.s32 %rd22, %r26, 4;\nadd.s64 %rd31, %rd2, %rd22;\n\n$L__BB0_7:\n.pragma \"nounroll\";\n.loc\t1 47 9\nld.global.nc.f32 %f37, [%rd32];\nld.global.nc.f32 %f38, [%rd31];\nfma.rn.ftz.f32 %f131, %f38, %f37, %f131;\n.loc\t1 46 5\nadd.s64 %rd32, %rd32, 4;\nadd.s64 %rd31, %rd31, 4;\nadd.s32 %r43, %r43, -1;\nsetp.ne.s32 %p8, %r43, 0;\n@%p8 bra $L__BB0_7;\n\n$L__BB0_8:\n.loc\t1 36 5\ncvta.to.global.u64 %rd23, %rd15;\n.loc\t1 49 5\nmul.wide.s32 %rd24, %r1, 4;\nadd.s64 %rd25, %rd23, %rd24;\nld.global.nc.f32 %f39, [%rd25];\nadd.ftz.f32 %f8, %f131, %f39;\n.loc\t1 52 5\n.loc\t1 22 5, function_name $L__info_string0, inlined_at 1 52 5\nabs.ftz.f32 %f40, %f8;\nmul.ftz.f32 %f41, %f40, 0fBFB8AA3B;\nex2.approx.ftz.f32 %f9, %f41;\nmov.f32 %f42, 0f3F800000;\nadd.rz.ftz.f32 %f43, %f9, %f42;\nmov.b32 %r27, %f43;\nadd.s32 %r28, %r27, -1061158912;\nand.b32 %r29, %r28, -8388608;\nmov.b32 %r12, %f9;\nsub.s32 %r30, %r12, %r29;\nmov.b32 %f44, %r30;\nmov.u32 %r31, 1082130432;\nsub.s32 %r32, %r31, %r29;\nmov.b32 %f45, %r32;\nmov.f32 %f46, 0fBF800000;\nmov.f32 %f47, 0f3E800000;\nfma.rn.ftz.f32 %f48, %f47, %f45, %f46;\nadd.ftz.f32 %f49, %f48, %f44;\ncvt.rn.f32.s32 %f50, %r29;\nmul.ftz.f32 %f51, %f50, 0f34000000;\nmov.f32 %f52, 0f3DD80012;\nmov.f32 %f53, 0fBD39BF78;\nfma.rn.ftz.f32 %f54, %f53, %f49, %f52;\nmov.f32 %f55, 0fBE0778E0;\nfma.rn.ftz.f32 %f56, %f54, %f49, %f55;\nmov.f32 %f57, 0f3E146475;\nfma.rn.ftz.f32 %f58, %f56, %f49, %f57;\nmov.f32 %f59, 0fBE2A68DD;\nfma.rn.ftz.f32 %f60, %f58, %f49, %f59;\nmov.f32 %f61, 0f3E4CAF9E;\nfma.rn.ftz.f32 %f62, %f60, %f49, %f61;\nmov.f32 %f63, 0fBE800042;\nfma.rn.ftz.f32 %f64, %f62, %f49, %f63;\nmov.f32 %f65, 0f3EAAAAE6;\nfma.rn.ftz.f32 %f66, %f64, %f49, %f65;\nmov.f32 %f67, 0fBF000000;\nfma.rn.ftz.f32 %f68, %f66, %f49, %f67;\nmul.ftz.f32 %f69, %f49, %f68;\nfma.rn.ftz.f32 %f70, %f69, %f49, %f49;\nmov.f32 %f71, 0f3F317218;\nfma.rn.ftz.f32 %f132, %f51, %f71, %f70;\nsetp.lt.u32 %p9, %r12, 2139095040;\n@%p9 bra $L__BB0_12;\n\nsetp.lt.s32 %p10, %r12, -1082130431;\n@%p10 bra $L__BB0_11;\n\nmov.f32 %f72, 0f7F800000;\nfma.rn.ftz.f32 %f132, %f9, %f72, %f72;\n\n$L__BB0_11:\nsetp.eq.ftz.f32 %p11, %f9, 0f00000000;\nselp.f32 %f132, 0f80000000, %f132, %p11;\n\n$L__BB0_12:\nmov.f32 %f73, 0f00000000;\nmax.ftz.f32 %f74, %f73, %f8;\nadd.ftz.f32 %f75, %f74, %f132;\n.loc\t1 23 5, function_name $L__info_string0, inlined_at 1 52 5\n.loc\t1 12 5, function_name $L__info_string1, inlined_at 1 23 5\nmul.ftz.f32 %f76, %f75, 0f3F8A4DD3;\n.loc\t1 13 5, function_name $L__info_string1, inlined_at 1 23 5\nmul.ftz.f32 %f77, %f76, %f76;\n.loc\t1 14 5, function_name $L__info_string1, inlined_at 1 23 5\nadd.ftz.f32 %f78, %f77, 0f401D1184;\nmul.ftz.f32 %f79, %f76, %f78;\n.loc\t1 15 5, function_name $L__info_string1, inlined_at 1 23 5\nfma.rn.ftz.f32 %f80, %f77, 0f3EF330B6, 0f3F800000;\nfma.rn.ftz.f32 %f82, %f77, %f80, 0f401D1184;\n.loc\t1 16 5, function_name $L__info_string1, inlined_at 1 23 5\ndiv.approx.ftz.f32 %f83, %f79, %f82;\n.loc\t1 23 5, function_name $L__info_string0, inlined_at 1 52 5\nmul.ftz.f32 %f15, %f8, %f83;\n.loc\t1 52 5\n.loc\t1 22 5, function_name $L__info_string0, inlined_at 1 52 5\nabs.ftz.f32 %f84, %f15;\nmul.ftz.f32 %f85, %f84, 0fBFB8AA3B;\nex2.approx.ftz.f32 %f16, %f85;\nadd.rz.ftz.f32 %f86, %f16, %f42;\nmov.b32 %r33, %f86;\nadd.s32 %r34, %r33, -1061158912;\nand.b32 %r35, %r34, -8388608;\nmov.b32 %r13, %f16;\nsub.s32 %r36, %r13, %r35;\nmov.b32 %f87, %r36;\nsub.s32 %r38, %r31, %r35;\nmov.b32 %f88, %r38;\nfma.rn.ftz.f32 %f91, %f47, %f88, %f46;\nadd.ftz.f32 %f92, %f91, %f87;\ncvt.rn.f32.s32 %f93, %r35;\nmul.ftz.f32 %f94, %f93, 0f34000000;\nfma.rn.ftz.f32 %f97, %f53, %f92, %f52;\nfma.rn.ftz.f32 %f99, %f97, %f92, %f55;\nfma.rn.ftz.f32 %f101, %f99, %f92, %f57;\nfma.rn.ftz.f32 %f103, %f101, %f92, %f59;\nfma.rn.ftz.f32 %f105, %f103, %f92, %f61;\nfma.rn.ftz.f32 %f107, %f105, %f92, %f63;\nfma.rn.ftz.f32 %f109, %f107, %f92, %f65;\nfma.rn.ftz.f32 %f111, %f109, %f92, %f67;\nmul.ftz.f32 %f112, %f92, %f111;\nfma.rn.ftz.f32 %f113, %f112, %f92, %f92;\nfma.rn.ftz.f32 %f134, %f94, %f71, %f113;\nsetp.lt.u32 %p12, %r13, 2139095040;\n@%p12 bra $L__BB0_16;\n\nsetp.lt.s32 %p13, %r13, -1082130431;\n@%p13 bra $L__BB0_15;\n\nmov.f32 %f115, 0f7F800000;\nfma.rn.ftz.f32 %f134, %f16, %f115, %f115;\n\n$L__BB0_15:\nsetp.eq.ftz.f32 %p14, %f16, 0f00000000;\nselp.f32 %f134, 0f80000000, %f134, %p14;\n\n$L__BB0_16:\nmax.ftz.f32 %f117, %f73, %f15;\nadd.ftz.f32 %f118, %f117, %f134;\n.loc\t1 23 5, function_name $L__info_string0, inlined_at 1 52 5\n.loc\t1 12 5, function_name $L__info_string1, inlined_at 1 23 5\nmul.ftz.f32 %f119, %f118, 0f3F8A4DD3;\n.loc\t1 13 5, function_name $L__info_string1, inlined_at 1 23 5\nmul.ftz.f32 %f120, %f119, %f119;\n.loc\t1 14 5, function_name $L__info_string1, inlined_at 1 23 5\nadd.ftz.f32 %f121, %f120, 0f401D1184;\nmul.ftz.f32 %f122, %f119, %f121;\n.loc\t1 15 5, function_name $L__info_string1, inlined_at 1 23 5\nfma.rn.ftz.f32 %f123, %f120, 0f3EF330B6, 0f3F800000;\nfma.rn.ftz.f32 %f124, %f120, %f123, 0f401D1184;\n.loc\t1 16 5, function_name $L__info_string1, inlined_at 1 23 5\ndiv.approx.ftz.f32 %f125, %f122, %f124;\n.loc\t1 23 5, function_name $L__info_string0, inlined_at 1 52 5\nmul.ftz.f32 %f126, %f15, %f125;\n.loc\t1 55 5\nmad.lo.s32 %r39, %r2, %r15, %r1;\n.loc\t1 36 5\ncvta.to.global.u64 %rd26, %rd16;\n.loc\t1 55 5\nmul.wide.s32 %rd27, %r39, 4;\nadd.s64 %rd28, %rd26, %rd27;\nst.global.f32 [%rd28], %f126;\n\n$L__BB0_17:\n.loc\t1 56 1\nret;\n\n}\n.file\t1 \"/tmp/trace_functional_to_cuda/torch_extensions/f4c1dd167034577392f32da66d895c2af427ad7d2121fb12a7ba03eb9d357edf/fused_linear_mish_mish/cuda.cu\"\n.section\t.debug_str\n{\n$L__info_string0:\n.b8 95,90,52,109,105,115,104,102,0\n$L__info_string1:\n.b8 95,90,57,102,97,115,116,95,116,97,110,104,102,0\n\n}",
+          "kernel": "_Z29fused_linear_mish_mish_kernelPKfS0_S0_Pfiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "linear_weight",
+            "linear_bias",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            1024,
+            32,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,77 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 16777216
+    },
+    "add_input": {
+      "size": 268435456
+    },
+    "conv_transpose_weight": {
+      "size": 55296
+    },
+    "conv_transpose_bias": {
+      "size": 64
+    },
+    "bias": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 268435456
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 32,
+    "trace_const_002": 64,
+    "trace_const_003": 16,
+    "trace_const_004": 3
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "26_ConvTranspose3d_Add_HardSwish.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_92f885c9_7_cuda_cu_8588ed9f4cuda3std3__439_GLOBAL__N__92f885c9_7_cuda_cu_8588ed9f6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_92f885c9_7_cuda_cu_8588ed9f4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_92f885c9_7_cuda_cu_8588ed9f4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_92f885c9_7_cuda_cu_8588ed9f4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_92f885c9_7_cuda_cu_8588ed9f4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_92f885c9_7_cuda_cu_8588ed9f6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii(\n.param .u64 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_0,\n.param .u64 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_1,\n.param .u64 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_2,\n.param .u64 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_3,\n.param .u32 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_4,\n.param .u32 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_5,\n.param .u32 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_6,\n.param .u32 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_7,\n.param .u32 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_8,\n.param .u32 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_9,\n.param .u32 _Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_10\n)\n{\n.reg .pred %p<2>;\n.reg .f32 %f<10>;\n.reg .b32 %r<15>;\n.reg .b64 %rd<8>;\n\n\nld.param.u64 %rd1, [_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_2];\nld.param.u64 %rd2, [_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_3];\nld.param.u32 %r2, [_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_4];\nld.param.u32 %r3, [_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_6];\nld.param.u32 %r4, [_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_7];\nld.param.u32 %r5, [_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_8];\nld.param.u32 %r6, [_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii_param_9];\nmov.u32 %r7, %ctaid.x;\nmov.u32 %r8, %ntid.x;\nmov.u32 %r9, %tid.x;\nmad.lo.s32 %r1, %r7, %r8, %r9;\nmul.lo.s32 %r10, %r2, %r3;\nmul.lo.s32 %r11, %r10, %r4;\nmul.lo.s32 %r12, %r11, %r5;\nmul.lo.s32 %r13, %r12, %r6;\nshl.b32 %r14, %r13, 3;\nsetp.ge.s32 %p1, %r1, %r14;\n@%p1 bra $L__BB0_2;\n\ncvta.to.global.u64 %rd3, %rd1;\nmul.wide.s32 %rd4, %r1, 4;\nadd.s64 %rd5, %rd3, %rd4;\nld.global.nc.f32 %f1, [%rd5];\nadd.ftz.f32 %f2, %f1, 0f00000000;\nmov.f32 %f3, 0f00000000;\nadd.ftz.f32 %f4, %f2, 0f40400000;\nmax.ftz.f32 %f5, %f4, %f3;\nmov.f32 %f6, 0f40C00000;\nmin.ftz.f32 %f7, %f5, %f6;\nmul.ftz.f32 %f8, %f2, %f7;\nmul.ftz.f32 %f9, %f8, 0f3E2AAAAB;\ncvta.to.global.u64 %rd6, %rd2;\nadd.s64 %rd7, %rd6, %rd4;\nst.global.f32 [%rd7], %f9;\n\n$L__BB0_2:\nret;\n\n}",
+          "kernel": "_Z41fused_conv_transpose_add_hardswish_kernelPKfS0_S0_Pfiiiiiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "conv_transpose_weight",
+            "add_input",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_003",
+            "trace_const_003",
+            "trace_const_003",
+            "trace_const_004"
+          ],
+          "grid_dim": [
+            1048576,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

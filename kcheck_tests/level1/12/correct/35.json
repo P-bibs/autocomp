@@ -1,0 +1,58 @@
+{
+  "source_tensors": {
+    "A": {
+      "size": 4096
+    },
+    "B": {
+      "size": 16777216
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 16777216
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "12_Matmul_with_diagonal_matrices_.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_968cffef_7_cuda_cu_8b5a50224cuda3std3__439_GLOBAL__N__968cffef_7_cuda_cu_8b5a50226ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_968cffef_7_cuda_cu_8b5a50224cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_968cffef_7_cuda_cu_8b5a50224cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_968cffef_7_cuda_cu_8b5a50224cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_968cffef_7_cuda_cu_8b5a50224cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_968cffef_7_cuda_cu_8b5a50226thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z20broadcast_mul_kernelPKfS0_Pfii(\n.param .u64 _Z20broadcast_mul_kernelPKfS0_Pfii_param_0,\n.param .u64 _Z20broadcast_mul_kernelPKfS0_Pfii_param_1,\n.param .u64 _Z20broadcast_mul_kernelPKfS0_Pfii_param_2,\n.param .u32 _Z20broadcast_mul_kernelPKfS0_Pfii_param_3,\n.param .u32 _Z20broadcast_mul_kernelPKfS0_Pfii_param_4\n)\n{\n.reg .pred %p<6>;\n.reg .f32 %f<66>;\n.reg .b32 %r<61>;\n.reg .b64 %rd<32>;\n\n\nld.param.u64 %rd4, [_Z20broadcast_mul_kernelPKfS0_Pfii_param_0];\nld.param.u64 %rd5, [_Z20broadcast_mul_kernelPKfS0_Pfii_param_1];\nld.param.u64 %rd6, [_Z20broadcast_mul_kernelPKfS0_Pfii_param_2];\nld.param.u32 %r15, [_Z20broadcast_mul_kernelPKfS0_Pfii_param_3];\nld.param.u32 %r14, [_Z20broadcast_mul_kernelPKfS0_Pfii_param_4];\ncvta.to.global.u64 %rd1, %rd6;\ncvta.to.global.u64 %rd2, %rd4;\ncvta.to.global.u64 %rd3, %rd5;\nadd.s32 %r16, %r14, 3;\nshr.s32 %r17, %r16, 31;\nshr.u32 %r18, %r17, 30;\nadd.s32 %r19, %r16, %r18;\nshr.s32 %r1, %r19, 2;\nmov.u32 %r20, %nctaid.x;\nmov.u32 %r21, %ntid.x;\nmul.lo.s32 %r2, %r21, %r20;\nmov.u32 %r22, %ctaid.x;\nmov.u32 %r23, %tid.x;\nmad.lo.s32 %r59, %r22, %r21, %r23;\nmul.lo.s32 %r4, %r1, %r15;\nsetp.ge.s32 %p1, %r59, %r4;\n@%p1 bra $L__BB0_5;\n\nadd.s32 %r24, %r2, %r4;\nadd.s32 %r25, %r59, %r2;\nnot.b32 %r26, %r25;\nadd.s32 %r27, %r24, %r26;\ndiv.u32 %r5, %r27, %r2;\nadd.s32 %r28, %r5, 1;\nand.b32 %r58, %r28, 3;\nsetp.eq.s32 %p2, %r58, 0;\n@%p2 bra $L__BB0_3;\n\n$L__BB0_2:\n.pragma \"nounroll\";\ndiv.s32 %r29, %r59, %r1;\nmul.lo.s32 %r30, %r29, %r1;\nsub.s32 %r31, %r59, %r30;\nshl.b32 %r32, %r31, 2;\nmad.lo.s32 %r33, %r29, %r14, %r32;\nmul.wide.s32 %rd7, %r33, 4;\nadd.s64 %rd8, %rd3, %rd7;\nld.global.nc.v4.f32 {%f1, %f2, %f3, %f4}, [%rd8];\nmul.wide.s32 %rd9, %r29, 4;\nadd.s64 %rd10, %rd2, %rd9;\nld.global.nc.f32 %f9, [%rd10];\nadd.s64 %rd11, %rd1, %rd7;\nmul.ftz.f32 %f10, %f9, %f4;\nmul.ftz.f32 %f11, %f9, %f3;\nmul.ftz.f32 %f12, %f9, %f2;\nmul.ftz.f32 %f13, %f9, %f1;\nst.global.v4.f32 [%rd11], {%f13, %f12, %f11, %f10};\nadd.s32 %r59, %r59, %r2;\nadd.s32 %r58, %r58, -1;\nsetp.ne.s32 %p3, %r58, 0;\n@%p3 bra $L__BB0_2;\n\n$L__BB0_3:\nsetp.lt.u32 %p4, %r5, 3;\n@%p4 bra $L__BB0_5;\n\n$L__BB0_4:\ndiv.s32 %r34, %r59, %r1;\nmul.lo.s32 %r35, %r34, %r1;\nsub.s32 %r36, %r59, %r35;\nshl.b32 %r37, %r36, 2;\nmad.lo.s32 %r38, %r34, %r14, %r37;\nmul.wide.s32 %rd12, %r38, 4;\nadd.s64 %rd13, %rd3, %rd12;\nld.global.nc.v4.f32 {%f14, %f15, %f16, %f17}, [%rd13];\nmul.wide.s32 %rd14, %r34, 4;\nadd.s64 %rd15, %rd2, %rd14;\nld.global.nc.f32 %f22, [%rd15];\nadd.s64 %rd16, %rd1, %rd12;\nmul.ftz.f32 %f23, %f22, %f17;\nmul.ftz.f32 %f24, %f22, %f16;\nmul.ftz.f32 %f25, %f22, %f15;\nmul.ftz.f32 %f26, %f22, %f14;\nst.global.v4.f32 [%rd16], {%f26, %f25, %f24, %f23};\nadd.s32 %r39, %r59, %r2;\ndiv.s32 %r40, %r39, %r1;\nmul.lo.s32 %r41, %r40, %r1;\nsub.s32 %r42, %r39, %r41;\nshl.b32 %r43, %r42, 2;\nmad.lo.s32 %r44, %r40, %r14, %r43;\nmul.wide.s32 %rd17, %r44, 4;\nadd.s64 %rd18, %rd3, %rd17;\nld.global.nc.v4.f32 {%f27, %f28, %f29, %f30}, [%rd18];\nmul.wide.s32 %rd19, %r40, 4;\nadd.s64 %rd20, %rd2, %rd19;\nld.global.nc.f32 %f35, [%rd20];\nadd.s64 %rd21, %rd1, %rd17;\nmul.ftz.f32 %f36, %f35, %f30;\nmul.ftz.f32 %f37, %f35, %f29;\nmul.ftz.f32 %f38, %f35, %f28;\nmul.ftz.f32 %f39, %f35, %f27;\nst.global.v4.f32 [%rd21], {%f39, %f38, %f37, %f36};\nadd.s32 %r45, %r39, %r2;\ndiv.s32 %r46, %r45, %r1;\nmul.lo.s32 %r47, %r46, %r1;\nsub.s32 %r48, %r45, %r47;\nshl.b32 %r49, %r48, 2;\nmad.lo.s32 %r50, %r46, %r14, %r49;\nmul.wide.s32 %rd22, %r50, 4;\nadd.s64 %rd23, %rd3, %rd22;\nld.global.nc.v4.f32 {%f40, %f41, %f42, %f43}, [%rd23];\nmul.wide.s32 %rd24, %r46, 4;\nadd.s64 %rd25, %rd2, %rd24;\nld.global.nc.f32 %f48, [%rd25];\nadd.s64 %rd26, %rd1, %rd22;\nmul.ftz.f32 %f49, %f48, %f43;\nmul.ftz.f32 %f50, %f48, %f42;\nmul.ftz.f32 %f51, %f48, %f41;\nmul.ftz.f32 %f52, %f48, %f40;\nst.global.v4.f32 [%rd26], {%f52, %f51, %f50, %f49};\nadd.s32 %r51, %r45, %r2;\ndiv.s32 %r52, %r51, %r1;\nmul.lo.s32 %r53, %r52, %r1;\nsub.s32 %r54, %r51, %r53;\nshl.b32 %r55, %r54, 2;\nmad.lo.s32 %r56, %r52, %r14, %r55;\nmul.wide.s32 %rd27, %r56, 4;\nadd.s64 %rd28, %rd3, %rd27;\nld.global.nc.v4.f32 {%f53, %f54, %f55, %f56}, [%rd28];\nmul.wide.s32 %rd29, %r52, 4;\nadd.s64 %rd30, %rd2, %rd29;\nld.global.nc.f32 %f61, [%rd30];\nadd.s64 %rd31, %rd1, %rd27;\nmul.ftz.f32 %f62, %f61, %f56;\nmul.ftz.f32 %f63, %f61, %f55;\nmul.ftz.f32 %f64, %f61, %f54;\nmul.ftz.f32 %f65, %f61, %f53;\nst.global.v4.f32 [%rd31], {%f65, %f64, %f63, %f62};\nadd.s32 %r59, %r51, %r2;\nsetp.lt.s32 %p5, %r59, %r4;\n@%p5 bra $L__BB0_4;\n\n$L__BB0_5:\nret;\n\n}",
+          "kernel": "_Z20broadcast_mul_kernelPKfS0_Pfii",
+          "defines": {},
+          "arguments": [
+            "A",
+            "B",
+            "out",
+            "trace_const_000",
+            "trace_const_000"
+          ],
+          "grid_dim": [
+            16384,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,71 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "conv_transpose_weight": {
+      "size": 55296
+    },
+    "conv_transpose_bias": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 134217728
+    }
+  },
+  "constants": {
+    "trace_const_000": 16,
+    "trace_const_001": 32,
+    "trace_const_002": 64,
+    "trace_const_003": 3
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_ConvTranspose3d_Softmax_Sigmoid.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_75\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_467f2829_7_cuda_cu_80f53f2a4cuda3std3__439_GLOBAL__N__467f2829_7_cuda_cu_80f53f2a6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_467f2829_7_cuda_cu_80f53f2a4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_467f2829_7_cuda_cu_80f53f2a4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_467f2829_7_cuda_cu_80f53f2a4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_467f2829_7_cuda_cu_80f53f2a4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_467f2829_7_cuda_cu_80f53f2a6thrust20THRUST_200400_750_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii(\n.param .u64 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_0,\n.param .u64 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_1,\n.param .u64 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_2,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_3,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_4,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_5,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_6,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_7,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_8,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_9,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_10,\n.param .u32 _Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_11\n)\n{\n.reg .b32 %r<13>;\n.reg .b64 %rd<5>;\n\n\nld.param.u64 %rd1, [_Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_2];\nld.param.u32 %r1, [_Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_5];\nld.param.u32 %r2, [_Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_6];\nld.param.u32 %r3, [_Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_7];\nld.param.u32 %r4, [_Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii_param_8];\ncvta.to.global.u64 %rd2, %rd1;\nmov.u32 %r5, %ctaid.z;\nmov.u32 %r6, %ctaid.x;\nmov.u32 %r7, %tid.x;\nmad.lo.s32 %r8, %r5, %r1, %r6;\nmul.lo.s32 %r9, %r8, %r2;\nmul.lo.s32 %r10, %r4, %r3;\nmad.lo.s32 %r11, %r10, %r9, %r7;\nmul.wide.s32 %rd3, %r11, 4;\nadd.s64 %rd4, %rd2, %rd3;\nmov.u32 %r12, 1060841128;\nst.global.u32 [%rd4], %r12;\nret;\n\n}",
+          "kernel": "_Z31fused_conv_transpose_act_kernelPKfS0_Pfiiiiiiiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "conv_transpose_weight",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_001",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_002",
+            "trace_const_003",
+            "trace_const_003",
+            "trace_const_003"
+          ],
+          "grid_dim": [
+            32,
+            1,
+            16
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}
