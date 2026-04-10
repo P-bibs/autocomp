@@ -140,7 +140,6 @@ fused_ext = load_inline(
     extra_cuda_cflags=['-O3', '--use_fast_math'],
     with_cuda=True
 )
-import code; code.interact(local=dict(globals(), **locals()))
 
 def functional_model(
     x,
