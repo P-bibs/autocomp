@@ -1,0 +1,31 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 16777216
+    },
+    "conv_weight": {
+      "size": 4608
+    },
+    "conv_bias": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 130056192
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "69_Conv2d_HardSwish_ReLU.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

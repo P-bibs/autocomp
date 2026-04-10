@@ -1,0 +1,34 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 8388608
+    },
+    "y": {
+      "size": 8388608
+    },
+    "bmm_weight": {
+      "size": 67108864
+    },
+    "bmm_bias": {
+      "size": 8192
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 8388608
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "28_BMM_InstanceNorm_Sum_ResidualAdd_Multiply.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

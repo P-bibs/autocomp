@@ -1,0 +1,25 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 805306368
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 805146624
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "41_Max_Pooling_1D.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,31 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 4194304
+    },
+    "matmul_weight": {
+      "size": 1073741824
+    },
+    "matmul_bias": {
+      "size": 32768
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 128
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "55_Matmul_MaxPool_Sum_Scale.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

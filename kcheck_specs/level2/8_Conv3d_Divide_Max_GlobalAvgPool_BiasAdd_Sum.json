@@ -1,0 +1,34 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 67108864
+    },
+    "conv_weight": {
+      "size": 3456
+    },
+    "conv_bias": {
+      "size": 16
+    },
+    "bias": {
+      "size": 16
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 128
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "8_Conv3d_Divide_Max_GlobalAvgPool_BiasAdd_Sum.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,31 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 33554432
+    },
+    "conv_transpose_weight": {
+      "size": 131072
+    },
+    "conv_transpose_bias": {
+      "size": 128
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 276889600
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "93_ConvTranspose2d_Add_Min_GELU_Multiply.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

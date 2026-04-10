@@ -1,0 +1,34 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 134217728
+    },
+    "conv_transpose_weight": {
+      "size": 36864
+    },
+    "conv_transpose_bias": {
+      "size": 64
+    },
+    "bias": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 536870912
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "2_ConvTranspose2d_BiasAdd_Clamp_Scaling_Clamp_Divide.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

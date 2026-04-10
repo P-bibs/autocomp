@@ -1,0 +1,40 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 16777216
+    },
+    "conv_weight": {
+      "size": 4608
+    },
+    "conv_bias": {
+      "size": 64
+    },
+    "group_norm_weight": {
+      "size": 64
+    },
+    "group_norm_bias": {
+      "size": 64
+    },
+    "scale": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 7872512
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "85_Conv2d_GroupNorm_Scale_MaxPool_Clamp.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

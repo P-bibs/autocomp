@@ -1,0 +1,31 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 268435456
+    },
+    "conv_weight": {
+      "size": 73728
+    },
+    "conv_bias": {
+      "size": 128
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 4129024
+    }
+  },
+  "constants": {},
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "32_Conv2d_Scaling_Min.cpp"
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}
