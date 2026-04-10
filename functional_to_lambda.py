@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import ast
 import importlib.util
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -62,7 +63,16 @@ def scalar_value(expr: str) -> ValueRef:
     return ValueRef(shape=(), renderer=lambda coord: expr)
 
 
-def tensor_arg_value(name: str, shape: tuple[int, ...]) -> ValueRef:
+def tensor_arg_value(name: str, shape: tuple[int, ...], backend: str) -> ValueRef:
+    if backend == "smt":
+        return ValueRef(shape=shape, renderer=lambda coord, name=name: f"_smt_select('{name}', {tuple_expr(coord)})")
+    if backend == "cpp":
+        if not shape:
+            return ValueRef(shape=shape, renderer=lambda coord, name=name: f"_smt_symbol({cpp_string_literal(name)})")
+        return ValueRef(
+            shape=shape,
+            renderer=lambda coord, name=name: f"_smt_select({cpp_string_literal(name)}{''.join(f', {item}' for item in coord)})",
+        )
     return ValueRef(shape=shape, renderer=lambda coord: f"_scalar({index_expr(name, coord)})")
 
 
@@ -101,6 +111,57 @@ def py_literal(value: Any) -> str:
     if isinstance(value, tuple):
         return repr(tuple(value))
     return repr(value)
+
+
+def cpp_string_literal(value: str) -> str:
+    return json.dumps(value)
+
+
+def tensor_size(shape: Sequence[int]) -> int:
+    return product(shape)
+
+
+def build_cpp_json_spec(spec: ModuleSpec, cpp_output_path: str | Path) -> dict[str, Any]:
+    cpp_path = Path(cpp_output_path)
+    source_tensors: dict[str, dict[str, int]] = {}
+
+    for name in spec.forward_arg_names:
+        shape = spec.input_shapes.get(name)
+        if shape is not None:
+            source_tensors[name] = {"size": tensor_size(shape)}
+
+    for name in spec.state_names:
+        value = spec.state_meta[name]
+        if isinstance(value, torch.Tensor):
+            source_tensors[name] = {"size": tensor_size(tuple(value.shape))}
+
+    return {
+        "source_tensors": source_tensors,
+        "dest_tensors": {
+            "out": {"size": tensor_size(spec.output_shape)},
+        },
+        "constants": {},
+        "pipelines": [
+            {
+                "scratch_tensors": {},
+                "kernels": [
+                    {
+                        "source": "spec",
+                        "file": cpp_path.name,
+                    }
+                ],
+            }
+        ],
+        "expected_result": "equivalent",
+    }
+
+
+def write_cpp_outputs(spec: ModuleSpec, cpp_source: str, cpp_output_path: str | Path) -> None:
+    cpp_path = Path(cpp_output_path)
+    cpp_path.write_text(cpp_source)
+    json_path = cpp_path.with_suffix(".json")
+    json_spec = build_cpp_json_spec(spec, cpp_path)
+    json_path.write_text(json.dumps(json_spec, indent=2) + "\n")
 
 
 def broadcast_shape(lhs: tuple[int, ...], rhs: tuple[int, ...]) -> tuple[int, ...]:
@@ -154,6 +215,25 @@ def pool_output_size(in_size: int, kernel: int, stride: int, padding: int, dilat
     return numerator // stride + 1
 
 
+def affine_expr(terms: Sequence[tuple[str, int]], constant: int = 0) -> str:
+    pieces: list[tuple[str, str]] = []
+    for term, coeff in terms:
+        if coeff == 0:
+            continue
+        mag = abs(int(coeff))
+        rendered = term if mag == 1 else f"({term} * {mag})"
+        pieces.append(("+" if coeff > 0 else "-", rendered))
+    if constant:
+        pieces.append(("+" if constant > 0 else "-", str(abs(int(constant)))))
+    if not pieces:
+        return "0"
+    first_sign, first_term = pieces[0]
+    expr = first_term if first_sign == "+" else f"(-{first_term})"
+    for sign, term in pieces[1:]:
+        expr = f"({expr} {sign} {term})"
+    return expr
+
+
 def render_nested_sum(bounds: Sequence[int], body_builder: Callable[[list[str]], str], prefix: str) -> str:
     vars_ = [f"{prefix}{idx}" for idx in range(len(bounds))]
     expr = body_builder(vars_)
@@ -168,6 +248,51 @@ def render_nested_stack_reduce(kind: str, bounds: Sequence[int], body_builder: C
     for var, bound in reversed(list(zip(vars_, bounds))):
         expr = f"{kind}(tuple(map(lambda {var}: {expr}, range({int(bound)}))))"
     return expr
+
+
+def render_nested_smt_sum(bounds: Sequence[int], body_builder: Callable[[list[str]], str], prefix: str) -> str:
+    vars_ = [f"{prefix}{idx}" for idx in range(len(bounds))]
+    expr = body_builder(vars_)
+    for var, bound in reversed(list(zip(vars_, bounds))):
+        expr = f"_smt_add(tuple(map(lambda {var}: {expr}, range({int(bound)}))))"
+    return expr
+
+
+def render_nested_smt_extreme(kind: str, bounds: Sequence[int], body_builder: Callable[[list[str]], str], prefix: str) -> str:
+    vars_ = [f"{prefix}{idx}" for idx in range(len(bounds))]
+    expr = body_builder(vars_)
+    reducer = "_smt_max" if kind == "max" else "_smt_min"
+    for var, bound in reversed(list(zip(vars_, bounds))):
+        expr = f"{reducer}(tuple(map(lambda {var}: {expr}, range({int(bound)}))))"
+    return expr
+
+
+def render_nested_cpp_sum(bounds: Sequence[int], body_builder: Callable[[list[str]], str], prefix: str) -> str:
+    if not bounds:
+        return body_builder([])
+    if len(bounds) == 1:
+        var = f"{prefix}0"
+        return f"_smt_add_range({int(bounds[0])}, [&](long long {var}) -> SmtString {{ return {body_builder([var])}; }})"
+    vars_ = [f"idx[{idx}]" for idx in range(len(bounds))]
+    return (
+        f"_smt_add_nd<{len(bounds)}>({{{', '.join(str(int(bound)) for bound in bounds)}}}, "
+        f"[&](const auto& idx) -> SmtString {{ return {body_builder(vars_)}; }})"
+    )
+
+
+def render_nested_cpp_extreme(kind: str, bounds: Sequence[int], body_builder: Callable[[list[str]], str], prefix: str) -> str:
+    if not bounds:
+        return body_builder([])
+    if len(bounds) == 1:
+        var = f"{prefix}0"
+        reducer = "_smt_max_range" if kind == "max" else "_smt_min_range"
+        return f"{reducer}({int(bounds[0])}, [&](long long {var}) -> SmtString {{ return {body_builder([var])}; }})"
+    vars_ = [f"idx[{idx}]" for idx in range(len(bounds))]
+    reducer = "_smt_max_nd" if kind == "max" else "_smt_min_nd"
+    return (
+        f"{reducer}<{len(bounds)}>({{{', '.join(str(int(bound)) for bound in bounds)}}}, "
+        f"[&](const auto& idx) -> SmtString {{ return {body_builder(vars_)}; }})"
+    )
 
 
 def render_reduction_input_coord(
@@ -260,9 +385,10 @@ def load_module_spec(path: str | Path) -> ModuleSpec:
 
 
 class LambdaLowerer:
-    def __init__(self, spec: ModuleSpec, function_name: str) -> None:
+    def __init__(self, spec: ModuleSpec, function_name: str, backend: str = "python") -> None:
         self.spec = spec
         self.function_name = function_name
+        self.backend = backend
         self.env: dict[str, ValueRef] = {}
         self.lines: list[str] = []
         self.tmp_index = 0
@@ -278,17 +404,23 @@ class LambdaLowerer:
         args = self.spec.module.get_inputs()
         for name, value in zip(self.spec.forward_arg_names, args):
             if isinstance(value, torch.Tensor):
-                self.env[name] = tensor_arg_value(name, tuple(value.shape))
+                self.env[name] = tensor_arg_value(name, tuple(value.shape), self.backend)
             else:
-                self.env[name] = scalar_value(name)
+                if self.backend == "cpp":
+                    self.env[name] = scalar_value(self.atom(name))
+                else:
+                    self.env[name] = scalar_value(self.atom(name))
         for name in self.spec.state_names:
             value = self.spec.state_meta[name]
             if isinstance(value, torch.Tensor):
-                self.env[name] = tensor_arg_value(name, tuple(value.shape))
+                self.env[name] = tensor_arg_value(name, tuple(value.shape), self.backend)
             elif value is None:
-                self.env[name] = scalar_value("None")
+                self.env[name] = scalar_value(self.atom("0.0") if self.backend == "cpp" else self.atom("None"))
             else:
-                self.env[name] = scalar_value(name)
+                if self.backend == "cpp":
+                    self.env[name] = scalar_value(self.atom(name))
+                else:
+                    self.env[name] = scalar_value(self.atom(name))
 
     def new_name(self) -> str:
         self.tmp_index += 1
@@ -316,18 +448,742 @@ class LambdaLowerer:
         return default
 
     def coordinate(self) -> list[str]:
-        return [f"coord[{idx}]" for idx in range(len(self.spec.output_shape))]
+        return self.coord_vars_for_shape(self.spec.output_shape)
+
+    def coord_vars_for_shape(self, shape: Sequence[int], source: str = "coord") -> list[str]:
+        vars_: list[str] = []
+        for idx, size in enumerate(shape):
+            if self.backend == "cpp" and int(size) == 1:
+                vars_.append("0")
+            else:
+                if self.backend == "cpp" and source != "coord":
+                    vars_.append(f"{source}{idx}")
+                else:
+                    vars_.append(f"{source}[{idx}]")
+        return vars_
+
+    def cpp_coord_param_names(self, shape: Sequence[int]) -> list[str]:
+        return [f"c{idx}" for idx in range(len(shape))]
+
+    def cpp_coord_param_decl(self, shape: Sequence[int]) -> str:
+        return ", ".join(f"long long {name}" for name in self.cpp_coord_param_names(shape))
+
+    def emits_cpp(self) -> bool:
+        return self.backend == "cpp"
+
+    def emits_smt_strings(self) -> bool:
+        return self.backend in {"smt", "cpp"}
+
+    def atom(self, text: str) -> str:
+        if self.backend == "smt":
+            return repr(text)
+        if self.backend == "cpp":
+            return cpp_string_literal(text)
+        return text
+
+    def fmt_add(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_add2({lhs}, {rhs})"
+        if self.backend == "cpp":
+            return f"_smt_add2({lhs}, {rhs})"
+        return f"({lhs} + {rhs})"
+
+    def fmt_sub(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_sub2({lhs}, {rhs})"
+        if self.backend == "cpp":
+            return f"_smt_sub2({lhs}, {rhs})"
+        return f"({lhs} - {rhs})"
+
+    def fmt_mul(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_mul2({lhs}, {rhs})"
+        if self.backend == "cpp":
+            return f"_smt_mul2({lhs}, {rhs})"
+        return f"({lhs} * {rhs})"
+
+    def fmt_div(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_div2({lhs}, {rhs})"
+        if self.backend == "cpp":
+            return f"_smt_div2({lhs}, {rhs})"
+        return f"({lhs} / {rhs})"
+
+    def fmt_int_div(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"(_ div {lhs} {rhs})"
+        if self.backend == "cpp":
+            return f"(({lhs}) / ({rhs}))"
+        return f"({lhs} // {rhs})"
+
+    def fmt_mod(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"(mod {lhs} {rhs})"
+        if self.backend == "cpp":
+            return f"(({lhs}) % ({rhs}))"
+        return f"({lhs} % {rhs})"
+
+    def fmt_eq(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"(= {lhs} {rhs})"
+        if self.backend == "cpp":
+            return f"(({lhs}) == ({rhs}))"
+        return f"({lhs} == {rhs})"
+
+    def fmt_le(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"(<= {lhs} {rhs})"
+        if self.backend == "cpp":
+            return f"(({lhs}) <= ({rhs}))"
+        return f"({lhs} <= {rhs})"
+
+    def fmt_lt(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"(< {lhs} {rhs})"
+        if self.backend == "cpp":
+            return f"(({lhs}) < ({rhs}))"
+        return f"({lhs} < {rhs})"
+
+    def fmt_in_bounds(self, expr: str, upper: int) -> str:
+        return self.fmt_and([self.fmt_le("0", expr), self.fmt_lt(expr, str(upper))])
+
+    def fmt_neg(self, expr: str) -> str:
+        if self.emits_smt_strings():
+            return self.fmt_sub("0.0", expr)
+        return f"(-{expr})"
+
+    def fmt_sqrt(self, expr: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_fun('sqrt', {expr})"
+        if self.backend == "cpp":
+            return f"_smt_fun(\"sqrt\", {expr})"
+        return f"math.sqrt({expr})"
+
+    def fmt_exp(self, expr: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_fun('exp', {expr})"
+        if self.backend == "cpp":
+            return f"_smt_fun(\"exp\", {expr})"
+        return f"math.exp({expr})"
+
+    def fmt_tanh(self, expr: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_fun('tanh', {expr})"
+        if self.backend == "cpp":
+            return f"_smt_fun(\"tanh\", {expr})"
+        return f"math.tanh({expr})"
+
+    def fmt_erf(self, expr: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_fun('erf', {expr})"
+        if self.backend == "cpp":
+            return f"_smt_fun(\"erf\", {expr})"
+        return f"math.erf({expr})"
+
+    def fmt_abs(self, expr: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_fun('abs', {expr})"
+        if self.backend == "cpp":
+            return f"_smt_fun(\"abs\", {expr})"
+        return f"abs({expr})"
+
+    def fmt_min(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_min2({lhs}, {rhs})"
+        if self.backend == "cpp":
+            return f"_smt_min2({lhs}, {rhs})"
+        return f"min({lhs}, {rhs})"
+
+    def fmt_max(self, lhs: str, rhs: str) -> str:
+        if self.backend == "smt":
+            return f"_smt_max2({lhs}, {rhs})"
+        if self.backend == "cpp":
+            return f"_smt_max2({lhs}, {rhs})"
+        return f"max({lhs}, {rhs})"
+
+    def fmt_if(self, cond: str, true_expr: str, false_expr: str) -> str:
+        if self.backend == "smt":
+            return f"(ite {cond} {true_expr} {false_expr})"
+        if self.backend == "cpp":
+            return f"(({cond}) ? ({true_expr}) : ({false_expr}))"
+        return f"({true_expr} if {cond} else {false_expr})"
+
+    def fmt_and(self, conds: Sequence[str]) -> str:
+        if self.backend == "smt":
+            return "true" if not conds else (conds[0] if len(conds) == 1 else f"(and {' '.join(conds)})")
+        if self.backend == "cpp":
+            if not conds:
+                return "true"
+            if len(conds) == 1:
+                return conds[0]
+            return f"({' && '.join(conds)})"
+        return " and ".join(conds) if conds else "True"
+
+    def coord_expr(self, items: Sequence[str]) -> str:
+        if self.backend == "cpp":
+            return ", ".join(items)
+        return tuple_expr(items)
+
+    def fmt_clamp(self, expr: str, min_expr: str | None, max_expr: str | None) -> str:
+        if min_expr is not None:
+            expr = self.fmt_max(expr, min_expr)
+        if max_expr is not None:
+            expr = self.fmt_min(expr, max_expr)
+        return expr
 
     def build(self) -> str:
-        self.lines.append("import math")
+        if self.backend == "cpp":
+            self.lines.append("#include <algorithm>")
+            self.lines.append("#include <charconv>")
+            self.lines.append("#include <array>")
+            self.lines.append("#include <cstdlib>")
+            self.lines.append("#include <initializer_list>")
+            self.lines.append("#include <iostream>")
+            self.lines.append("#include <memory_resource>")
+            self.lines.append("#include <string>")
+            self.lines.append("#include <vector>")
+            self.lines.append("")
+            self.lines.append("using Coord = std::array<long long, %d>;" % len(self.spec.output_shape))
+            self.lines.append("using SmtString = std::pmr::string;")
+            self.lines.append("")
+            self.lines.append("static inline SmtString _smt_symbol(const char* name) {")
+            self.lines.append("    return SmtString(name);")
+            self.lines.append("}")
+            self.lines.append("static inline void _smt_append_atom(SmtString& out, const SmtString& value) {")
+            self.lines.append("    out += value;")
+            self.lines.append("}")
+            self.lines.append("static inline void _smt_append_atom(SmtString& out, const char* value) {")
+            self.lines.append("    out += value;")
+            self.lines.append("}")
+            self.lines.append("template <typename T>")
+            self.lines.append("static inline void _smt_append_integral(SmtString& out, T value) {")
+            self.lines.append("    char buffer[32];")
+            self.lines.append("    auto [ptr, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value);")
+            self.lines.append("    if (ec == std::errc()) out.append(buffer, ptr);")
+            self.lines.append("}")
+            self.lines.append("static inline void _smt_append_atom(SmtString& out, int value) {")
+            self.lines.append("    _smt_append_integral(out, value);")
+            self.lines.append("}")
+            self.lines.append("static inline void _smt_append_atom(SmtString& out, long long value) {")
+            self.lines.append("    _smt_append_integral(out, value);")
+            self.lines.append("}")
+            self.lines.append("static inline void _smt_append_atom(SmtString& out, unsigned long long value) {")
+            self.lines.append("    _smt_append_integral(out, value);")
+            self.lines.append("}")
+            self.lines.append("static inline void _smt_append_atom(SmtString& out, bool value) {")
+            self.lines.append("    out += value ? \"true\" : \"false\";")
+            self.lines.append("}")
+            self.lines.append("template <typename T>")
+            self.lines.append("static inline void _smt_append_atom(SmtString& out, T value) {")
+            self.lines.append("    out += std::to_string(value);")
+            self.lines.append("}")
+            self.lines.append("template <typename... Args>")
+            self.lines.append("static inline SmtString _smt_select(const char* name, const Args&... idxs) {")
+            self.lines.append("    constexpr std::size_t count = sizeof...(Args);")
+            self.lines.append("    if constexpr (count == 0) return SmtString(name);")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(std::char_traits<char>::length(name) + count * 16);")
+            self.lines.append("    for (std::size_t i = 0; i < count; ++i) result += \"(select \";")
+            self.lines.append("    result += name;")
+            self.lines.append("    auto append_idx = [&](const auto& idx) {")
+            self.lines.append("        result += ' ';")
+            self.lines.append("        _smt_append_atom(result, idx);")
+            self.lines.append("        result += ')';")
+            self.lines.append("    };")
+            self.lines.append("    (append_idx(idxs), ...);")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("static inline SmtString _smt_fun(const char* name, const SmtString& arg) {")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(arg.size() + std::char_traits<char>::length(name) + 3);")
+            self.lines.append("    result += '(';")
+            self.lines.append("    result += name;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += arg;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_add2(const A& a, const B& b) {")
+            self.lines.append("    SmtString sa;")
+            self.lines.append("    SmtString sb;")
+            self.lines.append("    _smt_append_atom(sa, a);")
+            self.lines.append("    _smt_append_atom(sb, b);")
+            self.lines.append("    if (sa == \"0.0\") return sb;")
+            self.lines.append("    if (sb == \"0.0\") return sa;")
+            self.lines.append("    SmtString result = \"(+ \";")
+            self.lines.append("    result += sa;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += sb;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename B>")
+            self.lines.append("static inline SmtString _smt_add2(SmtString a, const B& b) {")
+            self.lines.append("    if (a == \"0.0\") {")
+            self.lines.append("        SmtString sb;")
+            self.lines.append("        _smt_append_atom(sb, b);")
+            self.lines.append("        return sb;")
+            self.lines.append("    }")
+            self.lines.append("    SmtString sb;")
+            self.lines.append("    _smt_append_atom(sb, b);")
+            self.lines.append("    if (sb == \"0.0\") return a;")
+            self.lines.append("    if (a.size() >= 2 && a[0] == '(' && a[1] == '+') {")
+            self.lines.append("        a.pop_back();")
+            self.lines.append("        a += ' ';")
+            self.lines.append("        a += sb;")
+            self.lines.append("        a += ')';")
+            self.lines.append("        return a;")
+            self.lines.append("    }")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(a.size() + sb.size() + 5);")
+            self.lines.append("    result += \"(+ \";")
+            self.lines.append("    result += a;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += sb;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_sub2(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(- \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_mul2(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(* \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_div2(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(/ \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_max2(const A& a, const B& b) {")
+            self.lines.append("    SmtString sa;")
+            self.lines.append("    SmtString sb;")
+            self.lines.append("    _smt_append_atom(sa, a);")
+            self.lines.append("    _smt_append_atom(sb, b);")
+            self.lines.append("    if (sa == \"(- 1.0e309)\") return sb;")
+            self.lines.append("    if (sb == \"(- 1.0e309)\") return sa;")
+            self.lines.append("    SmtString result = \"(max \";")
+            self.lines.append("    result += sa;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += sb;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename B>")
+            self.lines.append("static inline SmtString _smt_max2(SmtString a, const B& b) {")
+            self.lines.append("    if (a == \"(- 1.0e309)\") {")
+            self.lines.append("        SmtString sb;")
+            self.lines.append("        _smt_append_atom(sb, b);")
+            self.lines.append("        return sb;")
+            self.lines.append("    }")
+            self.lines.append("    SmtString sb;")
+            self.lines.append("    _smt_append_atom(sb, b);")
+            self.lines.append("    if (sb == \"(- 1.0e309)\") return a;")
+            self.lines.append("    if (a.size() >= 4 && a[0] == '(' && a[1] == 'm' && a[2] == 'a' && a[3] == 'x') {")
+            self.lines.append("        a.pop_back();")
+            self.lines.append("        a += ' ';")
+            self.lines.append("        a += sb;")
+            self.lines.append("        a += ')';")
+            self.lines.append("        return a;")
+            self.lines.append("    }")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(a.size() + sb.size() + 8);")
+            self.lines.append("    result += \"(max \";")
+            self.lines.append("    result += a;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += sb;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_min2(const A& a, const B& b) {")
+            self.lines.append("    SmtString sa;")
+            self.lines.append("    SmtString sb;")
+            self.lines.append("    _smt_append_atom(sa, a);")
+            self.lines.append("    _smt_append_atom(sb, b);")
+            self.lines.append("    if (sa == \"0.0\") return sb;")
+            self.lines.append("    if (sb == \"0.0\") return sa;")
+            self.lines.append("    SmtString result = \"(min \";")
+            self.lines.append("    result += sa;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += sb;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename B>")
+            self.lines.append("static inline SmtString _smt_min2(SmtString a, const B& b) {")
+            self.lines.append("    if (a == \"0.0\") {")
+            self.lines.append("        SmtString sb;")
+            self.lines.append("        _smt_append_atom(sb, b);")
+            self.lines.append("        return sb;")
+            self.lines.append("    }")
+            self.lines.append("    SmtString sb;")
+            self.lines.append("    _smt_append_atom(sb, b);")
+            self.lines.append("    if (sb == \"0.0\") return a;")
+            self.lines.append("    if (a.size() >= 4 && a[0] == '(' && a[1] == 'm' && a[2] == 'i' && a[3] == 'n') {")
+            self.lines.append("        a.pop_back();")
+            self.lines.append("        a += ' ';")
+            self.lines.append("        a += sb;")
+            self.lines.append("        a += ')';")
+            self.lines.append("        return a;")
+            self.lines.append("    }")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(a.size() + sb.size() + 8);")
+            self.lines.append("    result += \"(min \";")
+            self.lines.append("    result += a;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += sb;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_eq(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(= \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_le(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(<= \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_lt(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(< \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_mod(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(mod \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_int_div(const A& a, const B& b) {")
+            self.lines.append("    SmtString result = \"(_ div \";")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("static inline SmtString _smt_ite(const SmtString& cond, const SmtString& true_expr, const SmtString& false_expr) {")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(cond.size() + true_expr.size() + false_expr.size() + 8);")
+            self.lines.append("    result += \"(ite \";")
+            self.lines.append("    result += cond;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += true_expr;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += false_expr;")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename... Args>")
+            self.lines.append("static inline SmtString _smt_and(const Args&... conds) {")
+            self.lines.append("    if constexpr (sizeof...(Args) == 0) return \"true\";")
+            self.lines.append("    if constexpr (sizeof...(Args) == 1) {")
+            self.lines.append("        SmtString result;")
+            self.lines.append("        (_smt_append_atom(result, conds), ...);")
+            self.lines.append("        return result;")
+            self.lines.append("    }")
+            self.lines.append("    SmtString result = \"(and\";")
+            self.lines.append("    ((result += ' ', _smt_append_atom(result, conds)), ...);")
+            self.lines.append("    result += \")\";")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("static inline SmtString _smt_add(const std::vector<SmtString>& terms) {")
+            self.lines.append("    if (terms.empty()) return \"0.0\";")
+            self.lines.append("    if (terms.size() == 1) return terms.front();")
+            self.lines.append("    SmtString result = \"(+\";")
+            self.lines.append("    for (const auto& term : terms) result += \" \" + term;")
+            self.lines.append("    result += \")\";")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("static inline SmtString _smt_max(const std::vector<SmtString>& terms) {")
+            self.lines.append("    if (terms.empty()) return \"(- 1.0e309)\";")
+            self.lines.append("    SmtString acc = terms.back();")
+            self.lines.append("    for (std::size_t i = terms.size() - 1; i-- > 0;) {")
+            self.lines.append("        acc = \"(ite (>= \" + terms[i] + \" \" + acc + \") \" + terms[i] + \" \" + acc + \")\";")
+            self.lines.append("    }")
+            self.lines.append("    return acc;")
+            self.lines.append("}")
+            self.lines.append("static inline SmtString _smt_min(const std::vector<SmtString>& terms) {")
+            self.lines.append("    if (terms.empty()) return \"0.0\";")
+            self.lines.append("    SmtString acc = terms.back();")
+            self.lines.append("    for (std::size_t i = terms.size() - 1; i-- > 0;) {")
+            self.lines.append("        acc = \"(ite (<= \" + terms[i] + \" \" + acc + \") \" + terms[i] + \" \" + acc + \")\";")
+            self.lines.append("    }")
+            self.lines.append("    return acc;")
+            self.lines.append("}")
+            self.lines.append("template <typename F>")
+            self.lines.append("static inline SmtString _smt_add_range(long long n, F f) {")
+            self.lines.append("    if (n <= 0) return \"0.0\";")
+            self.lines.append("    std::pmr::vector<SmtString> terms;")
+            self.lines.append("    terms.reserve(static_cast<std::size_t>(n));")
+            self.lines.append("    for (long long i = 0; i < n; ++i) {")
+            self.lines.append("        SmtString term = f(i);")
+            self.lines.append("        if (term == \"0.0\") continue;")
+            self.lines.append("        terms.push_back(std::move(term));")
+            self.lines.append("    }")
+            self.lines.append("    if (terms.empty()) return SmtString(\"0.0\");")
+            self.lines.append("    if (terms.size() == 1) return std::move(terms.front());")
+            self.lines.append("    std::size_t total = 3;")
+            self.lines.append("    for (const auto& term : terms) total += term.size() + 1;")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(total);")
+            self.lines.append("    result += \"(+\";")
+            self.lines.append("    for (const auto& term : terms) {")
+            self.lines.append("        result += ' ';")
+            self.lines.append("        result += term;")
+            self.lines.append("    }")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <std::size_t Rank, typename F>")
+            self.lines.append("static inline SmtString _smt_add_nd(const std::array<long long, Rank>& bounds, F f) {")
+            self.lines.append("    if constexpr (Rank == 0) return f(std::array<long long, 0>{});")
+            self.lines.append("    for (long long bound : bounds) if (bound <= 0) return \"0.0\";")
+            self.lines.append("    std::array<long long, Rank> idx{};")
+            self.lines.append("    std::size_t capacity = 1;")
+            self.lines.append("    for (long long bound : bounds) capacity *= static_cast<std::size_t>(bound);")
+            self.lines.append("    std::pmr::vector<SmtString> terms;")
+            self.lines.append("    terms.reserve(capacity);")
+            self.lines.append("    while (true) {")
+            self.lines.append("        SmtString term = f(idx);")
+            self.lines.append("        if (term != \"0.0\") terms.push_back(std::move(term));")
+            self.lines.append("        std::size_t axis = Rank;")
+            self.lines.append("        while (axis > 0) {")
+            self.lines.append("            --axis;")
+            self.lines.append("            if (++idx[axis] < bounds[axis]) goto next_index;")
+            self.lines.append("            idx[axis] = 0;")
+            self.lines.append("        }")
+            self.lines.append("        break;")
+            self.lines.append("next_index:;")
+            self.lines.append("    }")
+            self.lines.append("    if (terms.empty()) return SmtString(\"0.0\");")
+            self.lines.append("    if (terms.size() == 1) return std::move(terms.front());")
+            self.lines.append("    std::size_t total = 3;")
+            self.lines.append("    for (const auto& term : terms) total += term.size() + 1;")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(total);")
+            self.lines.append("    result += \"(+\";")
+            self.lines.append("    for (const auto& term : terms) {")
+            self.lines.append("        result += ' ';")
+            self.lines.append("        result += term;")
+            self.lines.append("    }")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename F>")
+            self.lines.append("static inline SmtString _smt_max_range(long long n, F f) {")
+            self.lines.append("    if (n <= 0) return \"(- 1.0e309)\";")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    bool has_term = false;")
+            self.lines.append("    for (long long i = 0; i < n; ++i) {")
+            self.lines.append("        SmtString term = f(i);")
+            self.lines.append("        if (term == \"(- 1.0e309)\") continue;")
+            self.lines.append("        if (!has_term) {")
+            self.lines.append("            result = std::move(term);")
+            self.lines.append("            has_term = true;")
+            self.lines.append("            continue;")
+            self.lines.append("        }")
+            self.lines.append("        if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'a' && result[3] == 'x') {")
+            self.lines.append("            result.pop_back();")
+            self.lines.append("            result += ' ';")
+            self.lines.append("            result += term;")
+            self.lines.append("            result += ')';")
+            self.lines.append("        } else {")
+            self.lines.append("            SmtString next = \"(max \";")
+            self.lines.append("            next += result;")
+            self.lines.append("            next += ' ';")
+            self.lines.append("            next += term;")
+            self.lines.append("            next += ')';")
+            self.lines.append("            result.swap(next);")
+            self.lines.append("        }")
+            self.lines.append("    }")
+            self.lines.append("    return has_term ? result : SmtString(\"(- 1.0e309)\");")
+            self.lines.append("}")
+            self.lines.append("template <std::size_t Rank, typename F>")
+            self.lines.append("static inline SmtString _smt_max_nd(const std::array<long long, Rank>& bounds, F f) {")
+            self.lines.append("    if constexpr (Rank == 0) return f(std::array<long long, 0>{});")
+            self.lines.append("    for (long long bound : bounds) if (bound <= 0) return \"(- 1.0e309)\";")
+            self.lines.append("    std::array<long long, Rank> idx{};")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    bool has_term = false;")
+            self.lines.append("    while (true) {")
+            self.lines.append("        SmtString term = f(idx);")
+            self.lines.append("        if (term != \"(- 1.0e309)\") {")
+            self.lines.append("            if (!has_term) {")
+            self.lines.append("                result = std::move(term);")
+            self.lines.append("                has_term = true;")
+            self.lines.append("            } else if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'a' && result[3] == 'x') {")
+            self.lines.append("                result.pop_back();")
+            self.lines.append("                result += ' ';")
+            self.lines.append("                result += term;")
+            self.lines.append("                result += ')';")
+            self.lines.append("            } else {")
+            self.lines.append("                SmtString next = \"(max \";")
+            self.lines.append("                next += result;")
+            self.lines.append("                next += ' ';")
+            self.lines.append("                next += term;")
+            self.lines.append("                next += ')';")
+            self.lines.append("                result.swap(next);")
+            self.lines.append("            }")
+            self.lines.append("        }")
+            self.lines.append("        std::size_t axis = Rank;")
+            self.lines.append("        while (axis > 0) {")
+            self.lines.append("            --axis;")
+            self.lines.append("            if (++idx[axis] < bounds[axis]) goto next_index;")
+            self.lines.append("            idx[axis] = 0;")
+            self.lines.append("        }")
+            self.lines.append("        break;")
+            self.lines.append("next_index:;")
+            self.lines.append("    }")
+            self.lines.append("    return has_term ? result : SmtString(\"(- 1.0e309)\");")
+            self.lines.append("}")
+            self.lines.append("template <typename F>")
+            self.lines.append("static inline SmtString _smt_min_range(long long n, F f) {")
+            self.lines.append("    if (n <= 0) return \"0.0\";")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    bool has_term = false;")
+            self.lines.append("    for (long long i = 0; i < n; ++i) {")
+            self.lines.append("        SmtString term = f(i);")
+            self.lines.append("        if (term == \"0.0\") continue;")
+            self.lines.append("        if (!has_term) {")
+            self.lines.append("            result = std::move(term);")
+            self.lines.append("            has_term = true;")
+            self.lines.append("            continue;")
+            self.lines.append("        }")
+            self.lines.append("        if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'i' && result[3] == 'n') {")
+            self.lines.append("            result.pop_back();")
+            self.lines.append("            result += ' ';")
+            self.lines.append("            result += term;")
+            self.lines.append("            result += ')';")
+            self.lines.append("        } else {")
+            self.lines.append("            SmtString next = \"(min \";")
+            self.lines.append("            next += result;")
+            self.lines.append("            next += ' ';")
+            self.lines.append("            next += term;")
+            self.lines.append("            next += ')';")
+            self.lines.append("            result.swap(next);")
+            self.lines.append("        }")
+            self.lines.append("    }")
+            self.lines.append("    return has_term ? result : SmtString(\"0.0\");")
+            self.lines.append("}")
+            self.lines.append("template <std::size_t Rank, typename F>")
+            self.lines.append("static inline SmtString _smt_min_nd(const std::array<long long, Rank>& bounds, F f) {")
+            self.lines.append("    if constexpr (Rank == 0) return f(std::array<long long, 0>{});")
+            self.lines.append("    for (long long bound : bounds) if (bound <= 0) return \"0.0\";")
+            self.lines.append("    std::array<long long, Rank> idx{};")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    bool has_term = false;")
+            self.lines.append("    while (true) {")
+            self.lines.append("        SmtString term = f(idx);")
+            self.lines.append("        if (term != \"0.0\") {")
+            self.lines.append("            if (!has_term) {")
+            self.lines.append("                result = std::move(term);")
+            self.lines.append("                has_term = true;")
+            self.lines.append("            } else if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'i' && result[3] == 'n') {")
+            self.lines.append("                result.pop_back();")
+            self.lines.append("                result += ' ';")
+            self.lines.append("                result += term;")
+            self.lines.append("                result += ')';")
+            self.lines.append("            } else {")
+            self.lines.append("                SmtString next = \"(min \";")
+            self.lines.append("                next += result;")
+            self.lines.append("                next += ' ';")
+            self.lines.append("                next += term;")
+            self.lines.append("                next += ')';")
+            self.lines.append("                result.swap(next);")
+            self.lines.append("            }")
+            self.lines.append("        }")
+            self.lines.append("        std::size_t axis = Rank;")
+            self.lines.append("        while (axis > 0) {")
+            self.lines.append("            --axis;")
+            self.lines.append("            if (++idx[axis] < bounds[axis]) goto next_index;")
+            self.lines.append("            idx[axis] = 0;")
+            self.lines.append("        }")
+            self.lines.append("        break;")
+            self.lines.append("next_index:;")
+            self.lines.append("    }")
+            self.lines.append("    return has_term ? result : SmtString(\"0.0\");")
+            self.lines.append("}")
+            self.lines.append("")
+            self.lines.append(f"static constexpr long long kOutputSize = {product(self.spec.output_shape)}LL;")
+            self.lines.append("static inline bool _flat_coord_in_bounds(long long flat_coord) {")
+            self.lines.append("    return flat_coord >= 0 && flat_coord < kOutputSize;")
+            self.lines.append("}")
+            self.lines.append("")
+            self.lines.append("SmtString %s(long long flat_coord) {" % self.function_name)
+            self.lines.append("    const SmtString zero = \"0.0\";")
+            self.lines.append("    const SmtString neg_inf = \"(- 1.0e309)\";")
+            self.lines.append("    if (!_flat_coord_in_bounds(flat_coord)) return _smt_symbol(\"invalid_flat_coord\");")
+            self.lines.append("    Coord coord{};")
+            if self.spec.output_shape:
+                self.lines.append("    long long remaining = flat_coord;")
+                for idx in range(len(self.spec.output_shape) - 1, -1, -1):
+                    dim = int(self.spec.output_shape[idx])
+                    self.lines.append(f"    coord[{idx}] = remaining % {dim}LL;")
+                    if idx > 0:
+                        self.lines.append(f"    remaining /= {dim}LL;")
+        elif self.backend == "python":
+            self.lines.append("import math")
         self.lines.append("")
-        signature = ", ".join(
-            ["coord", *self.spec.forward_arg_names, "*", *self.spec.state_names]
-        )
-        self.lines.append(f"def {self.function_name}({signature}):")
-        self.lines.append("    _scalar = lambda v: v.item() if hasattr(v, 'item') else v")
-        self.lines.append("    zero = 0.0")
-        self.lines.append("    neg_inf = float('-inf')")
+        if self.backend != "cpp":
+            signature = ", ".join(
+                ["coord", *self.spec.forward_arg_names, "*", *self.spec.state_names]
+            )
+            self.lines.append(f"def {self.function_name}({signature}):")
+        if self.backend == "python":
+            self.lines.append("    _scalar = lambda v: v.item() if hasattr(v, 'item') else v")
+            self.lines.append("    zero = 0.0")
+            self.lines.append("    neg_inf = float('-inf')")
+        elif self.backend == "smt":
+            self.lines.append("    zero = '0.0'")
+            self.lines.append("    neg_inf = '(- 1.0e309)'")
+            self.lines.append("    _smt_select = lambda name, idxs: name if not idxs else f\"(select {_smt_select(name, idxs[:-1])} {idxs[-1]})\"")
+            self.lines.append("    _smt_fun = lambda name, arg: f\"({name} {arg})\"")
+            self.lines.append("    _smt_add2 = lambda a, b: f\"(+ {a} {b})\"")
+            self.lines.append("    _smt_sub2 = lambda a, b: f\"(- {a} {b})\"")
+            self.lines.append("    _smt_mul2 = lambda a, b: f\"(* {a} {b})\"")
+            self.lines.append("    _smt_div2 = lambda a, b: f\"(/ {a} {b})\"")
+            self.lines.append("    _smt_max2 = lambda a, b: f\"(ite (>= {a} {b}) {a} {b})\"")
+            self.lines.append("    _smt_min2 = lambda a, b: f\"(ite (<= {a} {b}) {a} {b})\"")
+            self.lines.append("    _smt_add = lambda terms: zero if not terms else (terms[0] if len(terms) == 1 else f\"(+ {' '.join(terms)})\")")
+            self.lines.append("    _smt_max = lambda terms: neg_inf if not terms else (terms[0] if len(terms) == 1 else f\"(ite (>= {terms[0]} {_smt_max(terms[1:])}) {terms[0]} {_smt_max(terms[1:])})\")")
+            self.lines.append("    _smt_min = lambda terms: zero if not terms else (terms[0] if len(terms) == 1 else f\"(ite (<= {terms[0]} {_smt_min(terms[1:])}) {terms[0]} {_smt_min(terms[1:])})\")")
         current: ValueRef | None = None
         for stmt in self.spec.functional_model.body:
             if isinstance(stmt, ast.Assign):
@@ -339,9 +1195,15 @@ class LambdaLowerer:
                     self.env[target] = value
                     continue
                 name = self.new_name()
-                coord_vars = [f"coord[{idx}]" for idx in range(len(value.shape))]
-                self.lines.append(f"    {name} = lambda coord: {value.render(coord_vars)}")
-                ref = lambda_value(name, value.shape)
+                coord_vars = self.coord_vars_for_shape(value.shape)
+                if self.backend == "cpp":
+                    param_decl = self.cpp_coord_param_decl(value.shape)
+                    param_vars = self.coord_vars_for_shape(value.shape, source="c")
+                    self.lines.append(f"    const auto {name} = [&](%s) -> SmtString {{ return %s; }};" % (param_decl, value.render(param_vars)))
+                    ref = ValueRef(shape=value.shape, renderer=lambda coord, name=name: f"{name}({self.coord_expr(coord)})")
+                else:
+                    self.lines.append(f"    {name} = lambda coord: {value.render(coord_vars)}")
+                    ref = lambda_value(name, value.shape)
                 self.env[target] = ref
                 current = ref
             elif isinstance(stmt, ast.Return):
@@ -355,7 +1217,28 @@ class LambdaLowerer:
             raise FunctionalToLambdaError(
                 f"Lowered output shape {current.shape} does not match meta output shape {self.spec.output_shape}"
             )
-        self.lines.append(f"    return {current.render([f'coord[{idx}]' for idx in range(len(current.shape))])}")
+        return_coord = self.coord_vars_for_shape(current.shape)
+        self.lines.append(f"    return {current.render(return_coord)};" if self.backend == "cpp" else f"    return {current.render(return_coord)}")
+        if self.backend == "cpp":
+            self.lines.append("}")
+            self.lines.append("")
+            self.lines.append("int main(int argc, char** argv) {")
+            self.lines.append("    if (argc != 2) {")
+            self.lines.append(
+                '        std::cerr << "expected exactly 1 coordinate argument, got " << (argc - 1) << \'\\n\';'
+            )
+            self.lines.append("        return 1;")
+            self.lines.append("    }")
+            self.lines.append("    std::pmr::unsynchronized_pool_resource smt_resource;")
+            self.lines.append("    std::pmr::set_default_resource(&smt_resource);")
+            self.lines.append("    long long flat_coord = std::strtoll(argv[1], nullptr, 10);")
+            self.lines.append("    if (!_flat_coord_in_bounds(flat_coord)) {")
+            self.lines.append('        std::cerr << "flat coordinate out of range: expected in [0, " << kOutputSize << "), got " << flat_coord << \'\\n\';')
+            self.lines.append("        return 1;")
+            self.lines.append("    }")
+            self.lines.append(f"    std::cout << {self.function_name}(flat_coord) << '\\n';")
+            self.lines.append("    return 0;")
+            self.lines.append("}")
         self.lines.append("")
         return "\n".join(self.lines)
 
@@ -383,20 +1266,22 @@ class LambdaLowerer:
             return self.env[node.id]
 
         if isinstance(node, ast.Constant):
-            return scalar_value(py_literal(node.value))
+            return scalar_value(self.atom(py_literal(node.value)))
 
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
             value = self.lower_expr(node.operand)
-            return scalar_value(f"(-{value.render(())})")
+            if self.backend == "smt":
+                return scalar_value(f"_smt_sub2('0.0', {value.render(())})")
+            return scalar_value(self.fmt_neg(value.render(())))
 
         if isinstance(node, ast.BinOp):
             lhs = self.lower_expr(node.left)
             rhs = self.lower_expr(node.right)
             op = {
-                ast.Add: "+",
-                ast.Sub: "-",
-                ast.Mult: "*",
-                ast.Div: "/",
+                ast.Add: self.fmt_add,
+                ast.Sub: self.fmt_sub,
+                ast.Mult: self.fmt_mul,
+                ast.Div: self.fmt_div,
             }.get(type(node.op))
             if op is None:
                 raise FunctionalToLambdaError(f"Unsupported binary operator: {ast.unparse(node)}")
@@ -404,8 +1289,10 @@ class LambdaLowerer:
             return ValueRef(
                 shape=out_shape,
                 renderer=lambda coord, lhs=lhs, rhs=rhs, out_shape=out_shape, op=op: (
-                    f"({lhs.render(broadcast_coord(coord, out_shape, lhs.shape))} {op} "
-                    f"{rhs.render(broadcast_coord(coord, out_shape, rhs.shape))})"
+                    op(
+                        lhs.render(broadcast_coord(coord, out_shape, lhs.shape)),
+                        rhs.render(broadcast_coord(coord, out_shape, rhs.shape)),
+                    )
                 ),
             )
 
@@ -457,25 +1344,33 @@ class LambdaLowerer:
         if callee in {"torch.softmax", "F.softmax"}:
             return self.lower_softmax(node)
         if callee in {"torch.relu"}:
-            return self.lower_unary(node, lambda e: f"max(0.0, {e})")
+            return self.lower_unary(node, lambda e: self.fmt_max("0.0", e))
         if callee in {"torch.tanh"}:
-            return self.lower_unary(node, lambda e: f"math.tanh({e})")
+            return self.lower_unary(node, lambda e: self.fmt_tanh(e))
         if callee in {"torch.sigmoid"}:
-            return self.lower_unary(node, lambda e: f"(1.0 / (1.0 + math.exp(-({e}))))")
+            return self.lower_unary(node, lambda e: self.fmt_div("1.0", self.fmt_add("1.0", self.fmt_exp(self.fmt_neg(e)))))
         if callee in {"torch.nn.functional.hardswish"}:
-            return self.lower_unary(node, lambda e: f"(({e}) * min(max(({e}) + 3.0, 0.0), 6.0) / 6.0)")
+            return self.lower_unary(node, lambda e: self.fmt_div(self.fmt_mul(e, self.fmt_min(self.fmt_max(self.fmt_add(e, "3.0"), "0.0"), "6.0")), "6.0"))
         if callee in {"torch.nn.functional.mish"}:
             return self.lower_unary(
                 node,
-                lambda e: (
-                    f"(({e}) * math.tanh(math.log1p(math.exp(-abs({e}))) + max(({e}), 0.0)))"
+                lambda e: self.fmt_mul(
+                    e,
+                    self.fmt_tanh(
+                        self.fmt_add(
+                            f"(log1p {self.fmt_exp(self.fmt_neg(self.fmt_abs(e)))})"
+                            if self.backend == "smt"
+                            else (f"_smt_fun(\"log1p\", {self.fmt_exp(self.fmt_neg(self.fmt_abs(e)))})" if self.backend == "cpp" else f"math.log1p({self.fmt_exp(f'-{self.fmt_abs(e)}')})"),
+                            self.fmt_max(e, "0.0"),
+                        )
+                    ),
                 ),
             )
         if callee in {"torch.nn.functional.gelu"}:
-            return self.lower_unary(node, lambda e: f"(0.5 * ({e}) * (1.0 + math.erf(({e}) * 0.7071067811865476)))")
+            return self.lower_unary(node, lambda e: self.fmt_mul(self.fmt_mul("0.5", e), self.fmt_add("1.0", self.fmt_erf(self.fmt_mul(e, "0.7071067811865476")))))
         if callee == "torch.tensor":
             value = self.static_value(node.args[0])
-            return scalar_value(py_literal(value))
+            return scalar_value(self.atom(py_literal(value)))
 
         if isinstance(node.func, ast.Attribute):
             method = node.func.attr
@@ -544,13 +1439,13 @@ class LambdaLowerer:
 
         def render(coord: Sequence[str], input_value=input_value, weight=weight, bias=bias, in_features=in_features) -> str:
             b, o = coord
-            bias_expr = f" + {bias.render([o])}" if bias is not None else ""
-            summation = render_nested_sum(
-                [in_features],
-                lambda vars_: f"({weight.render([o, vars_[0]])} * {input_value.render([b, vars_[0]])})",
-                "li_",
-            )
-            return f"({summation}{bias_expr})"
+            if self.backend == "smt":
+                summation = render_nested_smt_sum([in_features], lambda vars_: self.fmt_mul(weight.render([o, vars_[0]]), input_value.render([b, vars_[0]])), "li_")
+            elif self.backend == "cpp":
+                summation = render_nested_cpp_sum([in_features], lambda vars_: self.fmt_mul(weight.render([o, vars_[0]]), input_value.render([b, vars_[0]])), "li_")
+            else:
+                summation = render_nested_sum([in_features], lambda vars_: self.fmt_mul(weight.render([o, vars_[0]]), input_value.render([b, vars_[0]])), "li_")
+            return self.fmt_add(summation, bias.render([o])) if bias is not None else summation
 
         return ValueRef(shape=out_shape, renderer=render)
 
@@ -579,8 +1474,8 @@ class LambdaLowerer:
                 b = coord[0]
                 oc = coord[1]
                 spatial = list(coord[2:])
-                oc_local = oc if groups == 1 else f"({oc} % {out_per_group})"
-                group_base = "0" if groups == 1 else f"(({oc} // {out_per_group}) * {in_per_group})"
+                oc_local = oc if groups == 1 else self.fmt_mod(oc, str(out_per_group))
+                group_base = "0" if groups == 1 else f"({self.fmt_int_div(oc, str(out_per_group))} * {in_per_group})"
                 reduce_bounds = [in_per_group, *weight.shape[2:]]
 
                 def body(vars_: list[str]) -> str:
@@ -589,20 +1484,22 @@ class LambdaLowerer:
                     input_coords: list[str] = []
                     conds: list[str] = []
                     for axis, (out_axis, k, in_size) in enumerate(zip(spatial, kernels, input_value.shape[2:])):
-                        numer = f"({out_axis} + {padding[axis]} - {k} * {dilation[axis]})"
-                        coord_expr = f"({numer} // {stride[axis]})"
+                        numer = affine_expr([(out_axis, 1), (k, -dilation[axis])], padding[axis])
+                        coord_expr = self.fmt_int_div(numer, str(stride[axis]))
                         input_coords.append(coord_expr)
-                        conds.append(f"({numer} % {stride[axis]} == 0)")
-                        conds.append(f"(0 <= {coord_expr} < {in_size})")
+                        conds.append(self.fmt_eq(self.fmt_mod(numer, str(stride[axis])), "0"))
+                        conds.append(self.fmt_in_bounds(coord_expr, in_size))
                     ic_global = ic_local if groups == 1 else f"({group_base} + {ic_local})"
-                    prod_expr = (
-                        f"({weight.render([ic_global, oc_local, *kernels])} * "
-                        f"{input_value.render([b, ic_global, *input_coords])})"
-                    )
-                    return f"({prod_expr} if {' and '.join(conds)} else zero)"
+                    prod_expr = self.fmt_mul(weight.render([ic_global, oc_local, *kernels]), input_value.render([b, ic_global, *input_coords]))
+                    return self.fmt_if(self.fmt_and(conds), prod_expr, "zero")
 
-                bias_expr = f" + {bias.render([oc])}" if bias is not None else ""
-                return f"({render_nested_sum(reduce_bounds, body, 'tconv_')}{bias_expr})"
+                if self.backend == "smt":
+                    conv_expr = render_nested_smt_sum(reduce_bounds, body, "tconv_")
+                elif self.backend == "cpp":
+                    conv_expr = render_nested_cpp_sum(reduce_bounds, body, "tconv_")
+                else:
+                    conv_expr = render_nested_sum(reduce_bounds, body, "tconv_")
+                return self.fmt_add(conv_expr, bias.render([oc])) if bias is not None else conv_expr
 
             return ValueRef(shape=out_shape, renderer=render)
 
@@ -621,23 +1518,25 @@ class LambdaLowerer:
             oc = coord[1]
             spatial = list(coord[2:])
             reduce_bounds = [in_per_group, *weight.shape[2:]]
-            group_base = "0" if groups == 1 else f"(({oc} // {out_per_group}) * {in_per_group})"
+            group_base = "0" if groups == 1 else f"({self.fmt_int_div(oc, str(out_per_group))} * {in_per_group})"
 
             def body(vars_: list[str]) -> str:
                 ic_local = vars_[0]
                 kernels = vars_[1:]
                 ic_global = ic_local if groups == 1 else f"({group_base} + {ic_local})"
                 input_coords = [
-                    f"({out_axis} * {stride[axis]} - {padding[axis]} + {k} * {dilation[axis]})"
+                    affine_expr([(out_axis, stride[axis]), (k, dilation[axis])], -padding[axis])
                     for axis, (out_axis, k) in enumerate(zip(spatial, kernels))
                 ]
-                return (
-                    f"({weight.render([oc, ic_local, *kernels])} * "
-                    f"{input_value.render([b, ic_global, *input_coords])})"
-                )
+                return self.fmt_mul(weight.render([oc, ic_local, *kernels]), input_value.render([b, ic_global, *input_coords]))
 
-            bias_expr = f" + {bias.render([oc])}" if bias is not None else ""
-            return f"({render_nested_sum(reduce_bounds, body, 'conv_')}{bias_expr})"
+            if self.backend == "smt":
+                conv_expr = render_nested_smt_sum(reduce_bounds, body, "conv_")
+            elif self.backend == "cpp":
+                conv_expr = render_nested_cpp_sum(reduce_bounds, body, "conv_")
+            else:
+                conv_expr = render_nested_sum(reduce_bounds, body, "conv_")
+            return self.fmt_add(conv_expr, bias.render([oc])) if bias is not None else conv_expr
 
         return ValueRef(shape=out_shape, renderer=render)
 
@@ -647,10 +1546,13 @@ class LambdaLowerer:
         count = product(bounds)
 
         def render(coord: Sequence[str], input_value=input_value, dims=dims, keepdim=keepdim, count=count, bounds=bounds) -> str:
-            return (
-                f"({render_nested_sum(bounds, lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), dims, vars_, keepdim)), 'mean_')}"
-                f" / {count})"
-            )
+            if self.backend == "smt":
+                numer = render_nested_smt_sum(bounds, lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), dims, vars_, keepdim)), "mean_")
+            elif self.backend == "cpp":
+                numer = render_nested_cpp_sum(bounds, lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), dims, vars_, keepdim)), "mean_")
+            else:
+                numer = render_nested_sum(bounds, lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), dims, vars_, keepdim)), "mean_")
+            return self.fmt_div(numer, str(count))
 
         return ValueRef(shape=out_shape, renderer=render)
 
@@ -665,6 +1567,18 @@ class LambdaLowerer:
         bounds = [input_value.shape[d if d >= 0 else d + len(input_value.shape)] for d in dims]
 
         def render(coord: Sequence[str], input_value=input_value, dims=dims, keepdim=keepdim, bounds=bounds) -> str:
+            if self.backend == "smt":
+                return render_nested_smt_sum(
+                    bounds,
+                    lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), dims, vars_, keepdim)),
+                    "sum_",
+                )
+            if self.backend == "cpp":
+                return render_nested_cpp_sum(
+                    bounds,
+                    lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), dims, vars_, keepdim)),
+                    "sum_",
+                )
             return render_nested_sum(
                 bounds,
                 lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), dims, vars_, keepdim)),
@@ -680,6 +1594,20 @@ class LambdaLowerer:
         bound = input_value.shape[axis]
 
         def render(coord: Sequence[str], input_value=input_value, dim=dim, keepdim=keepdim, bound=bound, kind=kind) -> str:
+            if self.backend == "smt":
+                return render_nested_smt_extreme(
+                    kind,
+                    [bound],
+                    lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), [dim], vars_, keepdim)),
+                    f"{kind}_",
+                )
+            if self.backend == "cpp":
+                return render_nested_cpp_extreme(
+                    kind,
+                    [bound],
+                    lambda vars_: input_value.render(render_reduction_input_coord(coord, len(input_value.shape), [dim], vars_, keepdim)),
+                    f"{kind}_",
+                )
             return render_nested_stack_reduce(
                 kind,
                 [bound],
@@ -697,9 +1625,9 @@ class LambdaLowerer:
         out_shape = broadcast_shape(lhs.shape, rhs.shape)
         return ValueRef(
             shape=out_shape,
-            renderer=lambda coord, lhs=lhs, rhs=rhs, out_shape=out_shape: (
-                f"min({lhs.render(broadcast_coord(coord, out_shape, lhs.shape))}, "
-                f"{rhs.render(broadcast_coord(coord, out_shape, rhs.shape))})"
+            renderer=lambda coord, lhs=lhs, rhs=rhs, out_shape=out_shape: self.fmt_min(
+                lhs.render(broadcast_coord(coord, out_shape, lhs.shape)),
+                rhs.render(broadcast_coord(coord, out_shape, rhs.shape)),
             ),
         )
 
@@ -720,14 +1648,7 @@ class LambdaLowerer:
         max_expr = self.lower_expr(max_node).render(()) if max_node is not None else None
 
         def render(coord: Sequence[str], input_value=input_value, min_expr=min_expr, max_expr=max_expr) -> str:
-            expr = input_value.render(coord)
-            if min_expr is not None and max_expr is not None:
-                return f"min(max({expr}, {min_expr}), {max_expr})"
-            if min_expr is not None:
-                return f"max({expr}, {min_expr})"
-            if max_expr is not None:
-                return f"min({expr}, {max_expr})"
-            return expr
+            return self.fmt_clamp(input_value.render(coord), min_expr, max_expr)
 
         return ValueRef(shape=input_value.shape, renderer=render)
 
@@ -740,13 +1661,26 @@ class LambdaLowerer:
         bound = input_value.shape[axis]
 
         def render(coord: Sequence[str], input_value=input_value, axis=axis, bound=bound) -> str:
-            numer = f"math.exp({input_value.render(coord)})"
-            denom = render_nested_sum(
-                [bound],
-                lambda vars_: f"math.exp({input_value.render(list(coord[:axis]) + [vars_[0]] + list(coord[axis + 1 :]))})",
-                "softmax_",
-            )
-            return f"({numer} / {denom})"
+            numer = self.fmt_exp(input_value.render(coord))
+            if self.backend == "smt":
+                denom = render_nested_smt_sum(
+                    [bound],
+                    lambda vars_: self.fmt_exp(input_value.render(list(coord[:axis]) + [vars_[0]] + list(coord[axis + 1 :]))),
+                    "softmax_",
+                )
+            elif self.backend == "cpp":
+                denom = render_nested_cpp_sum(
+                    [bound],
+                    lambda vars_: self.fmt_exp(input_value.render(list(coord[:axis]) + [vars_[0]] + list(coord[axis + 1 :]))),
+                    "softmax_",
+                )
+            else:
+                denom = render_nested_sum(
+                    [bound],
+                    lambda vars_: self.fmt_exp(input_value.render(list(coord[:axis]) + [vars_[0]] + list(coord[axis + 1 :]))),
+                    "softmax_",
+                )
+            return self.fmt_div(numer, denom)
 
         return ValueRef(shape=input_value.shape, renderer=render)
 
@@ -754,7 +1688,7 @@ class LambdaLowerer:
         input_value = self.lower_expr(node.args[0])
         weight = self.lower_expr(node.args[2])
         bias = self.lower_expr(node.args[3])
-        eps_name = node.keywords[0].value.id if node.keywords else "group_norm_eps"
+        eps_name = self.atom(node.keywords[0].value.id if node.keywords else "group_norm_eps")
         num_groups = int(self.static_value(node.args[1]))
         channels = input_value.shape[1]
         spatial = input_value.shape[2:]
@@ -771,25 +1705,40 @@ class LambdaLowerer:
                     channel_expr = f"(({g_expr}) * {channels_per_group} + {vars_[0]})"
                     return input_value.render([b, channel_expr, *vars_[1:]])
 
-                return (
-                    f"({render_nested_sum([channels_per_group, *spatial], body, 'gnm_')}"
-                    f" / {count})"
-                )
+                if self.backend == "smt":
+                    total = render_nested_smt_sum([channels_per_group, *spatial], body, "gnm_")
+                elif self.backend == "cpp":
+                    total = render_nested_cpp_sum([channels_per_group, *spatial], body, "gnm_")
+                else:
+                    total = render_nested_sum([channels_per_group, *spatial], body, "gnm_")
+                return self.fmt_div(total, str(count))
 
             def var_for(g_expr: str, mean_expr: str) -> str:
                 def body(vars_: list[str]) -> str:
                     channel_expr = f"(({g_expr}) * {channels_per_group} + {vars_[0]})"
                     sample_expr = input_value.render([b, channel_expr, *vars_[1:]])
-                    return f"((lambda q: q * q)({sample_expr} - ({mean_expr})))"
+                    diff_expr = self.fmt_sub(sample_expr, mean_expr)
+                    return self.fmt_mul(diff_expr, diff_expr)
 
+                if self.backend == "smt":
+                    total = render_nested_smt_sum([channels_per_group, *spatial], body, "gnv_")
+                elif self.backend == "cpp":
+                    total = render_nested_cpp_sum([channels_per_group, *spatial], body, "gnv_")
+                else:
+                    total = render_nested_sum([channels_per_group, *spatial], body, "gnv_")
+                return self.fmt_div(total, str(count))
+
+            if self.backend == "cpp":
                 return (
-                    f"({render_nested_sum([channels_per_group, *spatial], body, 'gnv_')}"
-                    f" / {count})"
+                    "([&]() -> SmtString { "
+                    f"long long g = {c} / {channels_per_group}; "
+                    f"SmtString m = {mean_for('g')}; "
+                    f"SmtString v = {var_for('g', 'm')}; "
+                    f"return {self.fmt_add(self.fmt_div(self.fmt_mul(weight.render([c]), self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias.render([c]))}; "
+                    "}())"
                 )
-
             return (
-                f"((lambda g: (lambda m: (lambda v: ({weight.render([c])} * ({input_value.render([b, c, *spatial_coord])} - m) / "
-                f"math.sqrt(v + {eps_name}) + {bias.render([c])}))({var_for('g', 'm')}))({mean_for('g')}))({c} // {channels_per_group}))"
+                f"((lambda g: (lambda m: (lambda v: {self.fmt_add(self.fmt_div(self.fmt_mul(weight.render([c]), self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias.render([c]))})({var_for('g', 'm')}))({mean_for('g')}))({c} // {channels_per_group}))"
             )
 
         return ValueRef(shape=input_value.shape, renderer=render)
@@ -801,10 +1750,10 @@ class LambdaLowerer:
         use_input_stats = self.keyword_value(node, "use_input_stats", True)
         if not use_input_stats:
             raise FunctionalToLambdaError("Only use_input_stats=True instance_norm is supported")
-        eps_name = "instance_norm_eps"
+        eps_name = self.atom("instance_norm_eps")
         for keyword in node.keywords:
             if keyword.arg == "eps":
-                eps_name = ast.unparse(keyword.value)
+                eps_name = self.atom(ast.unparse(keyword.value))
         weight_name = "instance_norm_weight"
         bias_name = "instance_norm_bias"
         spatial = input_value.shape[2:]
@@ -813,17 +1762,42 @@ class LambdaLowerer:
         def render(coord: Sequence[str]) -> str:
             b, c = coord[0], coord[1]
             spatial_coord = list(coord[2:])
-            mean_expr = (
-                f"({render_nested_sum(list(spatial), lambda vars_: input_value.render([b, c, *vars_]), 'inm_')} / {count})"
-            )
-            var_expr = (
-                f"((lambda m: ({render_nested_sum(list(spatial), lambda vars_: f'((lambda q: q * q)({input_value.render([b, c, *vars_])} - m))', 'inv_')} / {count}))({mean_expr}))"
-            )
-            weight_expr = f"({weight_name}[{c}] if {weight_name} is not None else 1)"
-            bias_expr = f"({bias_name}[{c}] if {bias_name} is not None else 0)"
+            if self.backend == "smt":
+                mean_total = render_nested_smt_sum(list(spatial), lambda vars_: input_value.render([b, c, *vars_]), "inm_")
+            elif self.backend == "cpp":
+                mean_total = render_nested_cpp_sum(list(spatial), lambda vars_: input_value.render([b, c, *vars_]), "inm_")
+            else:
+                mean_total = render_nested_sum(list(spatial), lambda vars_: input_value.render([b, c, *vars_]), "inm_")
+            mean_expr = self.fmt_div(mean_total, str(count))
+            def var_body(vars_: list[str], mean_name: str = "m") -> str:
+                diff_expr = self.fmt_sub(input_value.render([b, c, *vars_]), mean_name)
+                return self.fmt_mul(diff_expr, diff_expr)
+            if self.backend == "smt":
+                var_total = render_nested_smt_sum(list(spatial), var_body, "inv_")
+            elif self.backend == "cpp":
+                var_total = render_nested_cpp_sum(list(spatial), lambda vars_: var_body(vars_, "m"), "inv_")
+            else:
+                var_total = render_nested_sum(list(spatial), var_body, "inv_")
+            var_expr = f"((lambda m: {self.fmt_div(var_total, str(count))})({mean_expr}))"
+            if self.backend == "smt":
+                weight_expr = f"_smt_select('{weight_name}', ({c},))"
+                bias_expr = f"_smt_select('{bias_name}', ({c},))"
+            elif self.backend == "cpp":
+                weight_expr = f"_smt_select({cpp_string_literal(weight_name)}, {{{c}}})" if self.spec.state_meta.get(weight_name) is not None else cpp_string_literal("1")
+                bias_expr = f"_smt_select({cpp_string_literal(bias_name)}, {{{c}}})" if self.spec.state_meta.get(bias_name) is not None else cpp_string_literal("0")
+            else:
+                weight_expr = f"({weight_name}[{c}] if {weight_name} is not None else 1)"
+                bias_expr = f"({bias_name}[{c}] if {bias_name} is not None else 0)"
+            if self.backend == "cpp":
+                return (
+                    "([&]() -> SmtString { "
+                    f"SmtString m = {mean_expr}; "
+                    f"SmtString v = {self.fmt_div(render_nested_cpp_sum(list(spatial), lambda vars_: var_body(vars_, 'm'), 'inv_'), str(count))}; "
+                    f"return {self.fmt_add(self.fmt_div(self.fmt_mul(weight_expr, self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias_expr)}; "
+                    "}())"
+                )
             return (
-                f"((lambda m: (lambda v: ({weight_expr} * ({input_value.render([b, c, *spatial_coord])} - m) / "
-                f"math.sqrt(v + {eps_name}) + {bias_expr}))({var_expr}))({mean_expr}))"
+                f"((lambda m: (lambda v: {self.fmt_add(self.fmt_div(self.fmt_mul(weight_expr, self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias_expr)})({var_expr}))({mean_expr}))"
             )
 
         return ValueRef(shape=input_value.shape, renderer=render)
@@ -848,17 +1822,21 @@ class LambdaLowerer:
 
             def body(vars_: list[str]) -> str:
                 input_coords = [
-                    f"({out_axis} * {stride[idx]} - {padding[idx]} + {vars_[idx]} * {dilation[idx]})"
+                    affine_expr([(out_axis, stride[idx]), (vars_[idx], dilation[idx])], -padding[idx])
                     for idx, out_axis in enumerate(spatial_coord)
                 ]
                 conds = [
-                    f"(0 <= {input_coords[idx]} < {input_value.shape[2 + idx]})"
+                    self.fmt_in_bounds(input_coords[idx], input_value.shape[2 + idx])
                     for idx in range(spatial_ndim)
                 ]
                 return (
-                    f"({input_value.render([*base, *input_coords])} if {' and '.join(conds)} else neg_inf)"
+                    self.fmt_if(self.fmt_and(conds), input_value.render([*base, *input_coords]), "neg_inf")
                 )
 
+            if self.backend == "smt":
+                return render_nested_smt_extreme("max", list(kernel), body, "pool_")
+            if self.backend == "cpp":
+                return render_nested_cpp_extreme("max", list(kernel), body, "pool_")
             return render_nested_stack_reduce("max", list(kernel), body, "pool_")
 
         return ValueRef(shape=out_shape, renderer=render)
@@ -873,16 +1851,20 @@ class LambdaLowerer:
 
         def render(coord: Sequence[str], input_value=input_value, count=count) -> str:
             b, c = coord[0], coord[1]
-            return (
-                f"({render_nested_sum(list(input_value.shape[2:]), lambda vars_: input_value.render([b, c, *vars_]), 'aap_')} / {count})"
-            )
+            if self.backend == "smt":
+                total = render_nested_smt_sum(list(input_value.shape[2:]), lambda vars_: input_value.render([b, c, *vars_]), "aap_")
+            elif self.backend == "cpp":
+                total = render_nested_cpp_sum(list(input_value.shape[2:]), lambda vars_: input_value.render([b, c, *vars_]), "aap_")
+            else:
+                total = render_nested_sum(list(input_value.shape[2:]), lambda vars_: input_value.render([b, c, *vars_]), "aap_")
+            return self.fmt_div(total, str(count))
 
         return ValueRef(shape=out_shape, renderer=render)
 
 
-def generate_source(path: str | Path, function_name: str = "value_at") -> str:
+def generate_source(path: str | Path, function_name: str = "value_at", backend: str = "python") -> str:
     spec = load_module_spec(path)
-    lowerer = LambdaLowerer(spec, function_name=function_name)
+    lowerer = LambdaLowerer(spec, function_name=function_name, backend=backend)
     return lowerer.build()
 
 
@@ -891,11 +1873,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("input_file", help="Path to the functional model file")
     parser.add_argument("--output", help="Optional output path for the generated module")
     parser.add_argument("--function-name", default="value_at", help="Generated function name")
+    parser.add_argument("--backend", choices=["python", "smt", "cpp"], default="python", help="Generated backend")
     args = parser.parse_args(argv)
 
-    source = generate_source(args.input_file, function_name=args.function_name)
+    source = generate_source(args.input_file, function_name=args.function_name, backend=args.backend)
     if args.output:
-        Path(args.output).write_text(source)
+        if args.backend == "cpp":
+            spec = load_module_spec(args.input_file)
+            write_cpp_outputs(spec, source, args.output)
+        else:
+            Path(args.output).write_text(source)
     else:
         print(source, end="")
     return 0
