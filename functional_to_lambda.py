@@ -440,13 +440,23 @@ class LambdaLowerer:
             if not name.startswith("__")
         }
         self.static_env.update(spec.state_meta)
+        self.name_use_counts = self.compute_name_use_counts(spec.functional_model)
         self._init_env()
 
     def _init_env(self) -> None:
         args = self.spec.module.get_inputs()
         for name, value in zip(self.spec.forward_arg_names, args):
             if isinstance(value, torch.Tensor):
-                self.env[name] = tensor_arg_value(name, tuple(value.shape), self.backend)
+                shape = tuple(value.shape)
+                cache_fn = self.cpp_runtime_cached_tensor_select_fn(name, shape)
+                if cache_fn is not None:
+                    cache_var = self.cpp_runtime_cached_tensor_cache_var(name)
+                    self.env[name] = ValueRef(
+                        shape=shape,
+                        renderer=lambda coord, cache_fn=cache_fn, cache_var=cache_var: f"{cache_fn}({', '.join(coord)}, {cache_var})",
+                    )
+                else:
+                    self.env[name] = tensor_arg_value(name, shape, self.backend)
             else:
                 if self.backend == "cpp":
                     self.env[name] = scalar_value(self.atom(name))
@@ -455,7 +465,22 @@ class LambdaLowerer:
         for name in self.spec.state_names:
             value = self.spec.state_meta[name]
             if isinstance(value, torch.Tensor):
-                self.env[name] = tensor_arg_value(name, tuple(value.shape), self.backend)
+                shape = tuple(value.shape)
+                cache_fn = self.cpp_cached_state_select_fn(name, shape)
+                if cache_fn is not None:
+                    self.env[name] = ValueRef(
+                        shape=shape,
+                        renderer=lambda coord, cache_fn=cache_fn: f"{cache_fn}({', '.join(coord)})",
+                    )
+                elif self.backend == "cpp" and (prefix_fn := self.cpp_cached_prefix_select_fn(name, shape)) is not None:
+                    self.env[name] = ValueRef(
+                        shape=shape,
+                        renderer=lambda coord, prefix_fn=prefix_fn: (
+                            f"_smt_select_from({prefix_fn}({coord[0]}){''.join(f', {item}' for item in coord[1:])})"
+                        ),
+                    )
+                else:
+                    self.env[name] = tensor_arg_value(name, shape, self.backend)
             elif value is None:
                 self.env[name] = scalar_value(self.atom("0.0") if self.backend == "cpp" else self.atom("None"))
             else:
@@ -509,6 +534,143 @@ class LambdaLowerer:
 
     def cpp_coord_param_decl(self, shape: Sequence[int]) -> str:
         return ", ".join(f"long long {name}" for name in self.cpp_coord_param_names(shape))
+
+    def cpp_cached_state_select_fn(self, name: str, shape: Sequence[int]) -> str | None:
+        if self.backend != "cpp" or not shape:
+            return None
+        if tensor_size(shape) > 4096:
+            return None
+        return f"_smt_cached_select_{name}"
+
+    def cpp_cached_prefix_select_fn(self, name: str, shape: Sequence[int]) -> str | None:
+        if self.backend != "cpp" or len(shape) < 2:
+            return None
+        return f"_smt_cached_prefix_{name}"
+
+    def cpp_runtime_cached_tensor_select_fn(self, name: str, shape: Sequence[int]) -> str | None:
+        if self.backend != "cpp" or len(shape) < 2:
+            return None
+        return f"_smt_runtime_cached_select_{name}"
+
+    def cpp_runtime_cached_tensor_cache_var(self, name: str) -> str:
+        return f"_smt_cache_{name}"
+
+    def cpp_flat_index_expr(self, coord_names: Sequence[str], shape: Sequence[int]) -> str:
+        if not coord_names:
+            return "0ULL"
+        expr = f"static_cast<std::size_t>({coord_names[0]})"
+        for idx, dim in enumerate(shape[1:], start=1):
+            expr = f"(({expr}) * {int(dim)}ULL + static_cast<std::size_t>({coord_names[idx]}))"
+        return expr
+
+    def cpp_cached_temp_var(self, name: str) -> str:
+        return f"{name}_cache"
+
+    def cpp_should_cache_temp(self, source_name: str, shape: Sequence[int]) -> bool:
+        if self.backend != "cpp" or not shape:
+            return False
+        return self.name_use_counts.get(source_name, 0) > 1
+
+    def compute_name_use_counts(self, function_node: ast.FunctionDef) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for stmt in function_node.body:
+            nodes: list[ast.AST] = []
+            if isinstance(stmt, ast.Assign):
+                nodes.append(stmt.value)
+            elif isinstance(stmt, ast.Return):
+                nodes.append(stmt.value)
+            for root in nodes:
+                for node in ast.walk(root):
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                        counts[node.id] = counts.get(node.id, 0) + 1
+        return counts
+
+    def emit_cpp_runtime_cached_tensor_selects(self) -> None:
+        if self.backend != "cpp":
+            return
+        for name, value in zip(self.spec.forward_arg_names, self.spec.module.get_inputs()):
+            if not isinstance(value, torch.Tensor):
+                continue
+            shape = tuple(value.shape)
+            cache_fn = self.cpp_runtime_cached_tensor_select_fn(name, shape)
+            if cache_fn is None:
+                continue
+            param_names = [f"i{idx}" for idx in range(len(shape))]
+            flat_expr = self.cpp_flat_index_expr(param_names, shape)
+            self.lines.append(
+                f"static inline const SmtString& {cache_fn}({', '.join(f'long long {name_}' for name_ in param_names)}, "
+                "SmtString** cache) {"
+            )
+            self.lines.append(f"    const std::size_t flat = {flat_expr};")
+            self.lines.append("    if (cache[flat] != nullptr) return *cache[flat];")
+            select_args = ", ".join(param_names)
+            self.lines.append(f'    cache[flat] = new SmtString(_smt_select({cpp_string_literal(name)}, {select_args}));')
+            self.lines.append("    return *cache[flat];")
+            self.lines.append("}")
+
+    def emit_cpp_cached_state_selects(self) -> None:
+        if self.backend != "cpp":
+            return
+        for name in self.spec.state_names:
+            value = self.spec.state_meta[name]
+            if not isinstance(value, torch.Tensor):
+                continue
+            shape = tuple(value.shape)
+            cache_fn = self.cpp_cached_state_select_fn(name, shape)
+            if cache_fn is None:
+                continue
+            size = tensor_size(shape)
+            param_names = [f"i{idx}" for idx in range(len(shape))]
+            flat_expr = self.cpp_flat_index_expr(param_names, shape)
+
+            self.lines.append(f"static inline const SmtString& {cache_fn}({', '.join(f'long long {name_}' for name_ in param_names)}) {{")
+            self.lines.append("    static const auto* cache = []() {")
+            self.lines.append(f"        auto* values = new std::array<SmtString, {size}>{{}};")
+            self.lines.append("        std::size_t flat = 0;")
+            loop_indent = "        "
+            for idx, dim in enumerate(shape):
+                self.lines.append(f"{loop_indent}for (long long i{idx} = 0; i{idx} < {int(dim)}LL; ++i{idx}) {{")
+                loop_indent += "    "
+            select_args = ", ".join(f"i{idx}" for idx in range(len(shape)))
+            self.lines.append(f'{loop_indent}(*values)[flat++] = _smt_select({cpp_string_literal(name)}, {select_args});')
+            for idx in range(len(shape) - 1, -1, -1):
+                loop_indent = loop_indent[:-4]
+                self.lines.append(f"{loop_indent}}}")
+            self.lines.append("        return values;")
+            self.lines.append("    }();")
+            self.lines.append(f"    return (*cache)[{flat_expr}];")
+            self.lines.append("}")
+
+    def emit_cpp_cached_prefix_selects(self) -> None:
+        if self.backend != "cpp":
+            return
+        seen: set[str] = set()
+        entries: list[tuple[str, tuple[int, ...]]] = []
+        for name, value in zip(self.spec.forward_arg_names, self.spec.module.get_inputs()):
+            if isinstance(value, torch.Tensor):
+                entries.append((name, tuple(value.shape)))
+        for name in self.spec.state_names:
+            value = self.spec.state_meta[name]
+            if isinstance(value, torch.Tensor):
+                entries.append((name, tuple(value.shape)))
+        for name, shape in entries:
+            if name in seen:
+                continue
+            seen.add(name)
+            if self.cpp_cached_state_select_fn(name, shape) is not None:
+                continue
+            cache_fn = self.cpp_cached_prefix_select_fn(name, shape)
+            if cache_fn is None:
+                continue
+            self.lines.append(f"static inline const SmtString& {cache_fn}(long long i0) {{")
+            self.lines.append("    static auto** cache = []() {")
+            self.lines.append(f"        return new SmtString*[{int(shape[0])}ULL]();")
+            self.lines.append("    }();")
+            self.lines.append("    const std::size_t flat = static_cast<std::size_t>(i0);")
+            self.lines.append("    if (cache[flat] != nullptr) return *cache[flat];")
+            self.lines.append(f'    cache[flat] = new SmtString(_smt_select({cpp_string_literal(name)}, i0));')
+            self.lines.append("    return *cache[flat];")
+            self.lines.append("}")
 
     def emits_cpp(self) -> bool:
         return self.backend == "cpp"
@@ -678,11 +840,13 @@ class LambdaLowerer:
             self.lines.append("#include <algorithm>")
             self.lines.append("#include <charconv>")
             self.lines.append("#include <array>")
+            self.lines.append("#include <cstdio>")
             self.lines.append("#include <cstdlib>")
             self.lines.append("#include <initializer_list>")
             self.lines.append("#include <iostream>")
             self.lines.append("#include <memory_resource>")
             self.lines.append("#include <string>")
+            self.lines.append("#include <unordered_map>")
             self.lines.append("#include <vector>")
             self.lines.append("")
             self.lines.append("using Coord = std::array<long long, %d>;" % len(self.spec.output_shape))
@@ -719,14 +883,84 @@ class LambdaLowerer:
             self.lines.append("static inline void _smt_append_atom(SmtString& out, T value) {")
             self.lines.append("    out += std::to_string(value);")
             self.lines.append("}")
+            self.lines.append("template <typename T>")
+            self.lines.append("static inline std::size_t _smt_integral_size(T value) {")
+            self.lines.append("    char buffer[32];")
+            self.lines.append("    auto [ptr, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value);")
+            self.lines.append("    return ec == std::errc() ? static_cast<std::size_t>(ptr - buffer) : 0;")
+            self.lines.append("}")
+            self.lines.append("static inline std::size_t _smt_atom_size(const SmtString& value) {")
+            self.lines.append("    return value.size();")
+            self.lines.append("}")
+            self.lines.append("static inline std::size_t _smt_atom_size(const char* value) {")
+            self.lines.append("    return std::char_traits<char>::length(value);")
+            self.lines.append("}")
+            self.lines.append("static inline std::size_t _smt_atom_size(int value) {")
+            self.lines.append("    return _smt_integral_size(value);")
+            self.lines.append("}")
+            self.lines.append("static inline std::size_t _smt_atom_size(long long value) {")
+            self.lines.append("    return _smt_integral_size(value);")
+            self.lines.append("}")
+            self.lines.append("static inline std::size_t _smt_atom_size(unsigned long long value) {")
+            self.lines.append("    return _smt_integral_size(value);")
+            self.lines.append("}")
+            self.lines.append("static inline std::size_t _smt_atom_size(bool value) {")
+            self.lines.append("    return value ? 4 : 5;")
+            self.lines.append("}")
+            self.lines.append("template <typename T>")
+            self.lines.append("static inline std::size_t _smt_atom_size(T value) {")
+            self.lines.append("    return std::to_string(value).size();")
+            self.lines.append("}")
+            self.lines.append("static inline void _smt_extend_variadic(SmtString& result, const SmtString& term) {")
+            self.lines.append("    result.reserve(result.size() + term.size() + 2);")
+            self.lines.append("    result.pop_back();")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    result += term;")
+            self.lines.append("    result += ')';")
+            self.lines.append("}")
+            self.lines.append("template <typename A, typename B>")
+            self.lines.append("static inline SmtString _smt_binary(const char* op, const A& a, const B& b) {")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(std::char_traits<char>::length(op) + _smt_atom_size(a) + _smt_atom_size(b) + 4);")
+            self.lines.append("    result += '(';")
+            self.lines.append("    result += op;")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, a);")
+            self.lines.append("    result += ' ';")
+            self.lines.append("    _smt_append_atom(result, b);")
+            self.lines.append("    result += ')';")
+            self.lines.append("    return result;")
+            self.lines.append("}")
             self.lines.append("template <typename... Args>")
             self.lines.append("static inline SmtString _smt_select(const char* name, const Args&... idxs) {")
             self.lines.append("    constexpr std::size_t count = sizeof...(Args);")
             self.lines.append("    if constexpr (count == 0) return SmtString(name);")
+            self.lines.append("    std::size_t total = std::char_traits<char>::length(name) + count * 9;")
+            self.lines.append("    auto add_idx_size = [&](const auto& idx) { total += _smt_atom_size(idx); };")
+            self.lines.append("    (add_idx_size(idxs), ...);")
             self.lines.append("    SmtString result;")
-            self.lines.append("    result.reserve(std::char_traits<char>::length(name) + count * 16);")
+            self.lines.append("    result.reserve(total);")
             self.lines.append("    for (std::size_t i = 0; i < count; ++i) result += \"(select \";")
             self.lines.append("    result += name;")
+            self.lines.append("    auto append_idx = [&](const auto& idx) {")
+            self.lines.append("        result += ' ';")
+            self.lines.append("        _smt_append_atom(result, idx);")
+            self.lines.append("        result += ')';")
+            self.lines.append("    };")
+            self.lines.append("    (append_idx(idxs), ...);")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename... Args>")
+            self.lines.append("static inline SmtString _smt_select_from(const SmtString& base, const Args&... idxs) {")
+            self.lines.append("    constexpr std::size_t count = sizeof...(Args);")
+            self.lines.append("    if constexpr (count == 0) return base;")
+            self.lines.append("    std::size_t total = base.size() + count * 9;")
+            self.lines.append("    auto add_idx_size = [&](const auto& idx) { total += _smt_atom_size(idx); };")
+            self.lines.append("    (add_idx_size(idxs), ...);")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(total);")
+            self.lines.append("    for (std::size_t i = 0; i < count; ++i) result += \"(select \";")
+            self.lines.append("    result += base;")
             self.lines.append("    auto append_idx = [&](const auto& idx) {")
             self.lines.append("        result += ' ';")
             self.lines.append("        _smt_append_atom(result, idx);")
@@ -753,12 +987,7 @@ class LambdaLowerer:
             self.lines.append("    _smt_append_atom(sb, b);")
             self.lines.append("    if (sa == \"0.0\") return sb;")
             self.lines.append("    if (sb == \"0.0\") return sa;")
-            self.lines.append("    SmtString result = \"(+ \";")
-            self.lines.append("    result += sa;")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    result += sb;")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"+\", sa, sb);")
             self.lines.append("}")
             self.lines.append("template <typename B>")
             self.lines.append("static inline SmtString _smt_add2(SmtString a, const B& b) {")
@@ -771,47 +1000,22 @@ class LambdaLowerer:
             self.lines.append("    _smt_append_atom(sb, b);")
             self.lines.append("    if (sb == \"0.0\") return a;")
             self.lines.append("    if (a.size() >= 2 && a[0] == '(' && a[1] == '+') {")
-            self.lines.append("        a.pop_back();")
-            self.lines.append("        a += ' ';")
-            self.lines.append("        a += sb;")
-            self.lines.append("        a += ')';")
+            self.lines.append("        _smt_extend_variadic(a, sb);")
             self.lines.append("        return a;")
             self.lines.append("    }")
-            self.lines.append("    SmtString result;")
-            self.lines.append("    result.reserve(a.size() + sb.size() + 5);")
-            self.lines.append("    result += \"(+ \";")
-            self.lines.append("    result += a;")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    result += sb;")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"+\", a, sb);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_sub2(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(- \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"-\", a, b);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_mul2(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(* \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"*\", a, b);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_div2(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(/ \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"/\", a, b);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_max2(const A& a, const B& b) {")
@@ -821,12 +1025,7 @@ class LambdaLowerer:
             self.lines.append("    _smt_append_atom(sb, b);")
             self.lines.append("    if (sa == \"(- 1.0e309)\") return sb;")
             self.lines.append("    if (sb == \"(- 1.0e309)\") return sa;")
-            self.lines.append("    SmtString result = \"(max \";")
-            self.lines.append("    result += sa;")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    result += sb;")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"max\", sa, sb);")
             self.lines.append("}")
             self.lines.append("template <typename B>")
             self.lines.append("static inline SmtString _smt_max2(SmtString a, const B& b) {")
@@ -839,20 +1038,10 @@ class LambdaLowerer:
             self.lines.append("    _smt_append_atom(sb, b);")
             self.lines.append("    if (sb == \"(- 1.0e309)\") return a;")
             self.lines.append("    if (a.size() >= 4 && a[0] == '(' && a[1] == 'm' && a[2] == 'a' && a[3] == 'x') {")
-            self.lines.append("        a.pop_back();")
-            self.lines.append("        a += ' ';")
-            self.lines.append("        a += sb;")
-            self.lines.append("        a += ')';")
+            self.lines.append("        _smt_extend_variadic(a, sb);")
             self.lines.append("        return a;")
             self.lines.append("    }")
-            self.lines.append("    SmtString result;")
-            self.lines.append("    result.reserve(a.size() + sb.size() + 8);")
-            self.lines.append("    result += \"(max \";")
-            self.lines.append("    result += a;")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    result += sb;")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"max\", a, sb);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_min2(const A& a, const B& b) {")
@@ -862,12 +1051,7 @@ class LambdaLowerer:
             self.lines.append("    _smt_append_atom(sb, b);")
             self.lines.append("    if (sa == \"0.0\") return sb;")
             self.lines.append("    if (sb == \"0.0\") return sa;")
-            self.lines.append("    SmtString result = \"(min \";")
-            self.lines.append("    result += sa;")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    result += sb;")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"min\", sa, sb);")
             self.lines.append("}")
             self.lines.append("template <typename B>")
             self.lines.append("static inline SmtString _smt_min2(SmtString a, const B& b) {")
@@ -880,65 +1064,30 @@ class LambdaLowerer:
             self.lines.append("    _smt_append_atom(sb, b);")
             self.lines.append("    if (sb == \"0.0\") return a;")
             self.lines.append("    if (a.size() >= 4 && a[0] == '(' && a[1] == 'm' && a[2] == 'i' && a[3] == 'n') {")
-            self.lines.append("        a.pop_back();")
-            self.lines.append("        a += ' ';")
-            self.lines.append("        a += sb;")
-            self.lines.append("        a += ')';")
+            self.lines.append("        _smt_extend_variadic(a, sb);")
             self.lines.append("        return a;")
             self.lines.append("    }")
-            self.lines.append("    SmtString result;")
-            self.lines.append("    result.reserve(a.size() + sb.size() + 8);")
-            self.lines.append("    result += \"(min \";")
-            self.lines.append("    result += a;")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    result += sb;")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"min\", a, sb);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_eq(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(= \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"=\", a, b);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_le(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(<= \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"<=\", a, b);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_lt(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(< \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"<\", a, b);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_mod(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(mod \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"mod\", a, b);")
             self.lines.append("}")
             self.lines.append("template <typename A, typename B>")
             self.lines.append("static inline SmtString _smt_int_div(const A& a, const B& b) {")
-            self.lines.append("    SmtString result = \"(_ div \";")
-            self.lines.append("    _smt_append_atom(result, a);")
-            self.lines.append("    result += ' ';")
-            self.lines.append("    _smt_append_atom(result, b);")
-            self.lines.append("    result += ')';")
-            self.lines.append("    return result;")
+            self.lines.append("    return _smt_binary(\"_ div\", a, b);")
             self.lines.append("}")
             self.lines.append("static inline SmtString _smt_ite(const SmtString& cond, const SmtString& true_expr, const SmtString& false_expr) {")
             self.lines.append("    SmtString result;")
@@ -1062,12 +1211,10 @@ class LambdaLowerer:
             self.lines.append("            continue;")
             self.lines.append("        }")
             self.lines.append("        if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'a' && result[3] == 'x') {")
-            self.lines.append("            result.pop_back();")
-            self.lines.append("            result += ' ';")
-            self.lines.append("            result += term;")
-            self.lines.append("            result += ')';")
+            self.lines.append("            _smt_extend_variadic(result, term);")
             self.lines.append("        } else {")
             self.lines.append("            SmtString next = \"(max \";")
+            self.lines.append("            next.reserve(result.size() + term.size() + 8);")
             self.lines.append("            next += result;")
             self.lines.append("            next += ' ';")
             self.lines.append("            next += term;")
@@ -1091,12 +1238,10 @@ class LambdaLowerer:
             self.lines.append("                result = std::move(term);")
             self.lines.append("                has_term = true;")
             self.lines.append("            } else if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'a' && result[3] == 'x') {")
-            self.lines.append("                result.pop_back();")
-            self.lines.append("                result += ' ';")
-            self.lines.append("                result += term;")
-            self.lines.append("                result += ')';")
+            self.lines.append("                _smt_extend_variadic(result, term);")
             self.lines.append("            } else {")
             self.lines.append("                SmtString next = \"(max \";")
+            self.lines.append("                next.reserve(result.size() + term.size() + 8);")
             self.lines.append("                next += result;")
             self.lines.append("                next += ' ';")
             self.lines.append("                next += term;")
@@ -1129,12 +1274,10 @@ class LambdaLowerer:
             self.lines.append("            continue;")
             self.lines.append("        }")
             self.lines.append("        if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'i' && result[3] == 'n') {")
-            self.lines.append("            result.pop_back();")
-            self.lines.append("            result += ' ';")
-            self.lines.append("            result += term;")
-            self.lines.append("            result += ')';")
+            self.lines.append("            _smt_extend_variadic(result, term);")
             self.lines.append("        } else {")
             self.lines.append("            SmtString next = \"(min \";")
+            self.lines.append("            next.reserve(result.size() + term.size() + 8);")
             self.lines.append("            next += result;")
             self.lines.append("            next += ' ';")
             self.lines.append("            next += term;")
@@ -1158,12 +1301,10 @@ class LambdaLowerer:
             self.lines.append("                result = std::move(term);")
             self.lines.append("                has_term = true;")
             self.lines.append("            } else if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'i' && result[3] == 'n') {")
-            self.lines.append("                result.pop_back();")
-            self.lines.append("                result += ' ';")
-            self.lines.append("                result += term;")
-            self.lines.append("                result += ')';")
+            self.lines.append("                _smt_extend_variadic(result, term);")
             self.lines.append("            } else {")
             self.lines.append("                SmtString next = \"(min \";")
+            self.lines.append("                next.reserve(result.size() + term.size() + 8);")
             self.lines.append("                next += result;")
             self.lines.append("                next += ' ';")
             self.lines.append("                next += term;")
@@ -1183,6 +1324,31 @@ class LambdaLowerer:
             self.lines.append("    return has_term ? result : SmtString(\"0.0\");")
             self.lines.append("}")
             self.lines.append("")
+            self.emit_cpp_runtime_cached_tensor_selects()
+            if any(
+                isinstance(arg, torch.Tensor)
+                and self.cpp_runtime_cached_tensor_select_fn(name, tuple(arg.shape)) is not None
+                for name, arg in zip(self.spec.forward_arg_names, self.spec.module.get_inputs())
+            ):
+                self.lines.append("")
+            self.emit_cpp_cached_state_selects()
+            if any(
+                isinstance(self.spec.state_meta[name], torch.Tensor)
+                and self.cpp_cached_state_select_fn(name, tuple(self.spec.state_meta[name].shape)) is not None
+                for name in self.spec.state_names
+            ):
+                self.lines.append("")
+            self.emit_cpp_cached_prefix_selects()
+            if any(
+                isinstance(value, torch.Tensor)
+                and self.cpp_cached_state_select_fn(name, tuple(value.shape)) is None
+                and self.cpp_cached_prefix_select_fn(name, tuple(value.shape)) is not None
+                for name, value in [
+                    *zip(self.spec.forward_arg_names, self.spec.module.get_inputs()),
+                    *((name, self.spec.state_meta[name]) for name in self.spec.state_names),
+                ]
+            ):
+                self.lines.append("")
             self.lines.append(f"static constexpr long long kOutputSize = {product(self.spec.output_shape)}LL;")
             self.lines.append("static inline bool _flat_coord_in_bounds(long long flat_coord) {")
             self.lines.append("    return flat_coord >= 0 && flat_coord < kOutputSize;")
@@ -1200,6 +1366,15 @@ class LambdaLowerer:
                     self.lines.append(f"    coord[{idx}] = remaining % {dim}LL;")
                     if idx > 0:
                         self.lines.append(f"    remaining /= {dim}LL;")
+            for name, arg in zip(self.spec.forward_arg_names, self.spec.module.get_inputs()):
+                if not isinstance(arg, torch.Tensor):
+                    continue
+                shape = tuple(arg.shape)
+                if self.cpp_runtime_cached_tensor_select_fn(name, shape) is None:
+                    continue
+                cache_var = self.cpp_runtime_cached_tensor_cache_var(name)
+                size = tensor_size(shape)
+                self.lines.append(f"    auto** {cache_var} = new SmtString*[{size}ULL]();")
         elif self.backend == "python":
             self.lines.append("import math")
         self.lines.append("")
@@ -1242,7 +1417,20 @@ class LambdaLowerer:
                 if self.backend == "cpp":
                     param_decl = self.cpp_coord_param_decl(value.shape)
                     param_vars = self.coord_vars_for_shape(value.shape, source="c")
-                    self.lines.append(f"    const auto {name} = [&](%s) -> SmtString {{ return %s; }};" % (param_decl, value.render(param_vars)))
+                    if self.cpp_should_cache_temp(target, value.shape):
+                        impl_name = f"{name}_impl"
+                        cache_var = self.cpp_cached_temp_var(name)
+                        size = tensor_size(value.shape)
+                        flat_expr = self.cpp_flat_index_expr(self.cpp_coord_param_names(value.shape), value.shape)
+                        self.lines.append(f"    auto** {cache_var} = new SmtString*[{size}ULL]();")
+                        self.lines.append(f"    const auto {impl_name} = [&](%s) -> SmtString {{ return %s; }};" % (param_decl, value.render(param_vars)))
+                        self.lines.append(f"    const auto {name} = [&](%s) -> const SmtString& {{ " % param_decl
+                                          + f"const std::size_t flat = {flat_expr}; "
+                                          + f"if ({cache_var}[flat] != nullptr) return *{cache_var}[flat]; "
+                                          + f"{cache_var}[flat] = new SmtString({impl_name}({', '.join(self.cpp_coord_param_names(value.shape))})); "
+                                          + f"return *{cache_var}[flat]; }};")
+                    else:
+                        self.lines.append(f"    const auto {name} = [&](%s) -> SmtString {{ return %s; }};" % (param_decl, value.render(param_vars)))
                     ref = ValueRef(shape=value.shape, renderer=lambda coord, name=name: f"{name}({self.coord_expr(coord)})")
                 else:
                     self.lines.append(f"    {name} = lambda coord: {value.render(coord_vars)}")
@@ -1279,8 +1467,11 @@ class LambdaLowerer:
             self.lines.append('        std::cerr << "flat coordinate out of range: expected in [0, " << kOutputSize << "), got " << flat_coord << \'\\n\';')
             self.lines.append("        return 1;")
             self.lines.append("    }")
-            self.lines.append(f"    std::cout << {self.function_name}(flat_coord) << '\\n';")
-            self.lines.append("    return 0;")
+            self.lines.append(f"    const SmtString result = {self.function_name}(flat_coord);")
+            self.lines.append("    std::fwrite(result.data(), 1, result.size(), stdout);")
+            self.lines.append("    std::fputc('\\n', stdout);")
+            self.lines.append("    std::fflush(stdout);")
+            self.lines.append("    std::_Exit(0);")
             self.lines.append("}")
         self.lines.append("")
         return "\n".join(self.lines)
@@ -1927,8 +2118,13 @@ class LambdaLowerer:
                 return (
                     "([&]() -> SmtString { "
                     f"long long g = {c} / {channels_per_group}; "
-                    f"SmtString m = {mean_for('g')}; "
-                    f"SmtString v = {var_for('g', 'm')}; "
+                    f"static auto** gn_mean_cache = new SmtString*[{input_value.shape[0] * num_groups}ULL](); "
+                    f"static auto** gn_var_cache = new SmtString*[{input_value.shape[0] * num_groups}ULL](); "
+                    f"const std::size_t gn_flat = ((static_cast<std::size_t>({b})) * {num_groups}ULL + static_cast<std::size_t>(g)); "
+                    f"if (gn_mean_cache[gn_flat] == nullptr) gn_mean_cache[gn_flat] = new SmtString({mean_for('g')}); "
+                    f"const SmtString& m = *gn_mean_cache[gn_flat]; "
+                    f"if (gn_var_cache[gn_flat] == nullptr) gn_var_cache[gn_flat] = new SmtString({var_for('g', 'm')}); "
+                    f"const SmtString& v = *gn_var_cache[gn_flat]; "
                     f"return {self.fmt_add(self.fmt_div(self.fmt_mul(weight.render([c]), self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias.render([c]))}; "
                     "}())"
                 )
@@ -1986,8 +2182,13 @@ class LambdaLowerer:
             if self.backend == "cpp":
                 return (
                     "([&]() -> SmtString { "
-                    f"SmtString m = {mean_expr}; "
-                    f"SmtString v = {self.fmt_div(render_nested_cpp_sum(list(spatial), lambda vars_: var_body(vars_, 'm'), 'inv_'), str(count))}; "
+                    f"static auto** in_mean_cache = new SmtString*[{input_value.shape[0] * input_value.shape[1]}ULL](); "
+                    f"static auto** in_var_cache = new SmtString*[{input_value.shape[0] * input_value.shape[1]}ULL](); "
+                    f"const std::size_t in_flat = ((static_cast<std::size_t>({b})) * {input_value.shape[1]}ULL + static_cast<std::size_t>({c})); "
+                    f"if (in_mean_cache[in_flat] == nullptr) in_mean_cache[in_flat] = new SmtString({mean_expr}); "
+                    f"const SmtString& m = *in_mean_cache[in_flat]; "
+                    f"if (in_var_cache[in_flat] == nullptr) in_var_cache[in_flat] = new SmtString({self.fmt_div(render_nested_cpp_sum(list(spatial), lambda vars_: var_body(vars_, 'm'), 'inv_'), str(count))}); "
+                    f"const SmtString& v = *in_var_cache[in_flat]; "
                     f"return {self.fmt_add(self.fmt_div(self.fmt_mul(weight_expr, self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias_expr)}; "
                     "}())"
                 )
@@ -2184,12 +2385,12 @@ def start_thread_to_terminate_when_parent_process_dies(ppid):
     thread.start()
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate coordinate-lambda artifacts for a tree of KernelBench functional models")
+    parser = argparse.ArgumentParser(description="Generate coordinate-lambda artifacts for KernelBench functional models")
     parser.add_argument(
-        "input_dir",
+        "input_path",
         nargs="?",
         default="KernelBench/KernelBenchFunctional",
-        help="Path to the input directory containing functional model files",
+        help="Path to an input directory or a single functional model file",
     )
     parser.add_argument("--output", default="kcheck_specs", help="Output directory root")
     parser.add_argument("--function-name", default="value_at", help="Generated function name")
@@ -2198,15 +2399,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="Regenerate outputs even when the expected output files already exist")
     args = parser.parse_args(argv)
 
-    input_root = Path(args.input_dir)
+    input_path = Path(args.input_path)
     output_root = Path(args.output)
-    if not input_root.is_dir():
-        raise FunctionalToLambdaError(f"Input directory does not exist or is not a directory: {input_root}")
+    if not input_path.exists():
+        raise FunctionalToLambdaError(f"Input path does not exist: {input_path}")
     if args.jobs < 1:
         raise FunctionalToLambdaError(f"--jobs must be at least 1, got {args.jobs}")
 
     output_root.mkdir(parents=True, exist_ok=True)
-    input_files = iter_input_files(input_root)
+    if input_path.is_dir():
+        input_root = input_path
+        input_files = iter_input_files(input_root)
+    elif input_path.is_file():
+        if input_path.suffix != ".py":
+            raise FunctionalToLambdaError(f"Single input file must be a Python file: {input_path}")
+        input_root = input_path.parent
+        input_files = [input_path]
+    else:
+        raise FunctionalToLambdaError(f"Input path must be a directory or a Python file: {input_path}")
 
     success_count = 0
     skipped_count = 0
