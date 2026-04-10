@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import difflib
+import hashlib
 import importlib.util
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -23,6 +27,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 ROOT = Path(__file__).resolve().parents[1]
 PRELOAD_SOURCE = ROOT / "trace_functional_to_cuda" / "cuda_trace_module_preload.cpp"
+DEFAULT_CHILD_TIMEOUT_SECONDS = 600.0
+CHILD_OUTPUT_BUFFER_LINES = 200
 CREATOR_OPS = {
     "arange",
     "empty",
@@ -555,7 +561,131 @@ def build_preload_library() -> Path:
     return output_path
 
 
-def _run_child_trace(model_file: Path, function_name: str, device: str, preload_library: Path) -> dict[str, Any]:
+def _model_torch_extensions_dir(model_file: Path) -> Path:
+    model_key = hashlib.sha256(str(model_file.resolve()).encode("utf-8")).hexdigest()
+    root = Path(tempfile.gettempdir()) / "trace_functional_to_cuda" / "torch_extensions"
+    return root / model_key
+
+
+def _discover_lock_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and (path.name == "lock" or path.suffix == ".lock")
+    )
+
+
+def _child_failure_message(
+    *,
+    command: Sequence[str],
+    extension_root: Path,
+    output_lines: Sequence[str],
+    reason: str,
+) -> str:
+    lock_lines = [str(path) for path in _discover_lock_files(extension_root)]
+    formatted_output = "".join(output_lines).rstrip()
+    return textwrap.dedent(
+        f"""
+        Child trace process failed: {reason}
+        command: {' '.join(command)}
+        torch_extensions_dir: {extension_root}
+        lock_files:
+        {chr(10).join(lock_lines) if lock_lines else '(none)'}
+        hint: inline CUDA compilation or a stale torch extension lock is the likely cause.
+        child_output:
+        {formatted_output if formatted_output else '(no child output captured)'}
+        """
+    ).strip()
+
+
+def _run_child_process(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_seconds: float | None,
+) -> tuple[int, str]:
+    buffered_lines: deque[str] = deque(maxlen=CHILD_OUTPUT_BUFFER_LINES)
+    start = time.monotonic()
+    process = subprocess.Popen(
+        list(command),
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    output_queue: queue.Queue[str | None] = queue.Queue()
+
+    def _reader() -> None:
+        assert process.stdout is not None
+        try:
+            for line in iter(process.stdout.readline, ""):
+                output_queue.put(line)
+        finally:
+            output_queue.put(None)
+
+    reader_thread = threading.Thread(target=_reader, name="trace-functional-child-output", daemon=True)
+    reader_thread.start()
+    try:
+        while True:
+            if timeout_seconds is not None and (time.monotonic() - start) > timeout_seconds:
+                process.kill()
+                process.wait(timeout=5)
+                raise TraceFunctionalToCudaError(
+                    _child_failure_message(
+                        command=command,
+                        extension_root=Path(env["TORCH_EXTENSIONS_DIR"]),
+                        output_lines=list(buffered_lines),
+                        reason=f"timed out after {timeout_seconds:g} seconds",
+                    )
+                )
+
+            try:
+                line = output_queue.get(timeout=0.05)
+            except queue.Empty:
+                if process.poll() is not None:
+                    break
+                continue
+
+            if line is None:
+                if process.poll() is not None:
+                    break
+                continue
+
+            if line:
+                sys.stderr.write(line)
+                sys.stderr.flush()
+                buffered_lines.append(line)
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+        reader_thread.join(timeout=1)
+
+    while True:
+        try:
+            line = output_queue.get_nowait()
+        except queue.Empty:
+            break
+        if line:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            buffered_lines.append(line)
+
+    return process.returncode or 0, "".join(buffered_lines)
+
+
+def _run_child_trace(
+    model_file: Path,
+    function_name: str,
+    device: str,
+    preload_library: Path,
+    *,
+    child_timeout_seconds: float | None,
+) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="trace_functional_to_cuda_") as tmp_dir_name:
         tmp_dir = Path(tmp_dir_name)
         kernel_trace_path = tmp_dir / "kernel_launches.jsonl"
@@ -566,6 +696,9 @@ def _run_child_trace(model_file: Path, function_name: str, device: str, preload_
             f"{preload_library}:{existing_preload}" if existing_preload else str(preload_library)
         )
         env["CUDA_TRACE_JSON_PATH"] = str(kernel_trace_path)
+        extensions_dir = _model_torch_extensions_dir(model_file)
+        extensions_dir.mkdir(parents=True, exist_ok=True)
+        env["TORCH_EXTENSIONS_DIR"] = str(extensions_dir)
 
         command = [
             sys.executable,
@@ -581,19 +714,20 @@ def _run_child_trace(model_file: Path, function_name: str, device: str, preload_
             "--bundle-output",
             str(bundle_path),
         ]
-        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
-        if result.returncode != 0:
+        return_code, child_output = _run_child_process(
+            command,
+            cwd=ROOT,
+            env=env,
+            timeout_seconds=child_timeout_seconds,
+        )
+        if return_code != 0:
             raise TraceFunctionalToCudaError(
-                "Child trace process failed:\n"
-                + textwrap.dedent(
-                    f"""
-                    command: {' '.join(command)}
-                    stdout:
-                    {result.stdout}
-                    stderr:
-                    {result.stderr}
-                    """
-                ).strip()
+                _child_failure_message(
+                    command=command,
+                    extension_root=extensions_dir,
+                    output_lines=child_output.splitlines(keepends=True),
+                    reason=f"exited with status {return_code}",
+                )
             )
         return json.loads(bundle_path.read_text())
 
@@ -812,6 +946,7 @@ def trace_functional_model_to_json(
     device: str = "cuda:0",
     function_name: str = "functional_model",
     check_determinism: bool = False,
+    child_timeout_seconds: float = DEFAULT_CHILD_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     model_path = Path(model_file).resolve()
     input_path = Path(input_json).resolve()
@@ -825,9 +960,18 @@ def trace_functional_model_to_json(
     _ensure_runtime_prerequisites()
     preload_library = build_preload_library()
     input_payload = json.loads(input_path.read_text())
+    normalized_child_timeout = None if child_timeout_seconds == 0 else child_timeout_seconds
+    if normalized_child_timeout is not None and normalized_child_timeout < 0:
+        raise TraceFunctionalToCudaError("child_timeout_seconds must be non-negative")
 
     def run_once() -> dict[str, Any]:
-        trace_bundle = _run_child_trace(model_path, function_name, device, preload_library)
+        trace_bundle = _run_child_trace(
+            model_path,
+            function_name,
+            device,
+            preload_library,
+            child_timeout_seconds=normalized_child_timeout,
+        )
         return build_output_json(trace_bundle, input_payload)
 
     output_payload = run_once()
@@ -870,6 +1014,12 @@ def _public_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="cuda:0", help="CUDA device to use for tracing")
     parser.add_argument("--function-name", default="functional_model", help="Function to invoke inside the model module")
     parser.add_argument("--check-determinism", action="store_true", help="Run the full trace twice and require identical canonical JSON output")
+    parser.add_argument(
+        "--child-timeout-seconds",
+        type=float,
+        default=DEFAULT_CHILD_TIMEOUT_SECONDS,
+        help="Timeout for the child trace process; use 0 to disable the timeout",
+    )
     return parser
 
 
@@ -897,6 +1047,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             device=args.device,
             function_name=args.function_name,
             check_determinism=args.check_determinism,
+            child_timeout_seconds=args.child_timeout_seconds,
         )
     except TraceFunctionalToCudaError as exc:
         print(str(exc), file=sys.stderr)
