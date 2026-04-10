@@ -1204,9 +1204,10 @@ class LambdaLowerer:
             self.lines.append("import math")
         self.lines.append("")
         if self.backend != "cpp":
-            signature = ", ".join(
-                ["coord", *self.spec.forward_arg_names, "*", *self.spec.state_names]
-            )
+            signature_parts = ["coord", *self.spec.forward_arg_names]
+            if self.spec.state_names:
+                signature_parts.extend(["*", *self.spec.state_names])
+            signature = ", ".join(signature_parts)
             self.lines.append(f"def {self.function_name}({signature}):")
         if self.backend == "python":
             self.lines.append("    _scalar = lambda v: v.item() if hasattr(v, 'item') else v")
@@ -1318,12 +1319,19 @@ class LambdaLowerer:
 
         if isinstance(node, ast.BinOp):
             lhs = self.lower_expr(node.left)
-            rhs = self.lower_expr(node.right)
+            if isinstance(node.op, ast.Pow):
+                exponent = self.static_value(node.right)
+                if exponent != 2:
+                    raise FunctionalToLambdaError(f"Unsupported binary operator: {ast.unparse(node)}")
+                rhs = lhs
+            else:
+                rhs = self.lower_expr(node.right)
             op = {
                 ast.Add: self.fmt_add,
                 ast.Sub: self.fmt_sub,
                 ast.Mult: self.fmt_mul,
                 ast.Div: self.fmt_div,
+                ast.Pow: self.fmt_mul,
             }.get(type(node.op))
             if op is None:
                 raise FunctionalToLambdaError(f"Unsupported binary operator: {ast.unparse(node)}")
@@ -1349,13 +1357,14 @@ class LambdaLowerer:
     def lower_subscript(self, node: ast.Subscript) -> ValueRef:
         if isinstance(node.value, ast.Call):
             call = node.value
-            if full_name(call.func) == "torch.min" and isinstance(node.slice, ast.Constant) and node.slice.value == 0:
+            callee = full_name(call.func)
+            if callee in {"torch.min", "torch.max"} and isinstance(node.slice, ast.Constant) and node.slice.value == 0:
                 input_value = self.lower_expr(call.args[0])
                 dim = self.keyword_value(call, "dim")
                 if dim is None and len(call.args) >= 2:
                     dim = self.static_value(call.args[1])
                 keepdim = bool(self.keyword_value(call, "keepdim", False))
-                return self.reduce_extreme(input_value, dim, keepdim, "min")
+                return self.reduce_extreme(input_value, dim, keepdim, "min" if callee == "torch.min" else "max")
         raise FunctionalToLambdaError(f"Unsupported indexing pattern: {ast.unparse(node)}")
 
     def lower_call(self, node: ast.Call) -> ValueRef:
@@ -1363,7 +1372,7 @@ class LambdaLowerer:
             return self.lower_expr(self.alias_source(node))
         callee = full_name(node.func)
 
-        if callee in {"F.conv2d", "F.conv3d"}:
+        if callee in {"F.conv1d", "F.conv2d", "F.conv3d"}:
             return self.lower_conv(node, transpose=False)
         if callee in {"F.conv_transpose2d", "F.conv_transpose3d"}:
             return self.lower_conv(node, transpose=True)
@@ -1375,22 +1384,38 @@ class LambdaLowerer:
             return self.lower_instance_norm(node)
         if callee in {"F.max_pool1d", "F.max_pool2d", "F.max_pool3d"}:
             return self.lower_max_pool(node)
+        if callee == "F.avg_pool1d":
+            return self.lower_avg_pool1d(node)
         if callee == "F.adaptive_avg_pool3d":
             return self.lower_adaptive_avg_pool3d(node)
         if callee in {"torch.sum"}:
             return self.lower_sum(node)
+        if callee in {"torch.mean"}:
+            return self.lower_mean(node, self.lower_expr(node.args[0]), dim_arg_index=1)
         if callee in {"torch.min"}:
             return self.lower_torch_min(node)
+        if callee in {"torch.max"}:
+            return self.lower_torch_max(node)
         if callee in {"torch.clamp"}:
             return self.lower_clamp(node)
+        if callee in {"torch.matmul"}:
+            return self.lower_matmul(node)
+        if callee in {"torch.bmm"}:
+            return self.lower_bmm(node)
+        if callee in {"torch.cumsum"}:
+            return self.lower_cumsum(node)
         if callee in {"torch.softmax", "F.softmax"}:
             return self.lower_softmax(node)
         if callee in {"torch.relu"}:
             return self.lower_unary(node, lambda e: self.fmt_max("0.0", e))
+        if callee in {"torch.abs"}:
+            return self.lower_unary(node, lambda e: self.fmt_abs(e))
         if callee in {"torch.tanh"}:
             return self.lower_unary(node, lambda e: self.fmt_tanh(e))
         if callee in {"torch.sigmoid"}:
             return self.lower_unary(node, lambda e: self.fmt_div("1.0", self.fmt_add("1.0", self.fmt_exp(self.fmt_neg(e)))))
+        if callee in {"torch.nn.functional.leaky_relu", "F.leaky_relu"}:
+            return self.lower_leaky_relu(node)
         if callee in {"torch.nn.functional.hardswish"}:
             return self.lower_unary(node, lambda e: self.fmt_div(self.fmt_mul(e, self.fmt_min(self.fmt_max(self.fmt_add(e, "3.0"), "0.0"), "6.0")), "6.0"))
         if callee in {"torch.nn.functional.mish"}:
@@ -1417,11 +1442,7 @@ class LambdaLowerer:
         if isinstance(node.func, ast.Attribute):
             method = node.func.attr
             if method == "mean":
-                input_value = self.lower_expr(node.func.value)
-                dims = self.keyword_value(node, "dim")
-                if dims is None and node.args:
-                    dims = self.static_value(node.args[0])
-                return self.reduce_mean(input_value, list(dims), False)
+                return self.lower_mean(node, self.lower_expr(node.func.value), dim_arg_index=0)
             if method == "unsqueeze":
                 input_value = self.lower_expr(node.func.value)
                 dim = self.static_value(node.args[0])
@@ -1436,6 +1457,33 @@ class LambdaLowerer:
     def lower_unary(self, node: ast.Call, render_fn: Callable[[str], str]) -> ValueRef:
         input_value = self.lower_expr(node.args[0])
         return ValueRef(shape=input_value.shape, renderer=lambda coord, input_value=input_value: render_fn(input_value.render(coord)))
+
+    def lower_optional_value(self, node: ast.AST | None) -> ValueRef | None:
+        if node is None:
+            return None
+        if isinstance(node, ast.Constant) and node.value is None:
+            return None
+        if isinstance(node, ast.Name) and self.static_env.get(node.id) is None:
+            return None
+        return self.lower_expr(node)
+
+    def render_optional_bias(self, bias: ValueRef | None, index: str) -> str | None:
+        if bias is None:
+            return None
+        if bias.shape == ():
+            return bias.render(())
+        if bias.shape == (1,):
+            return bias.render(["0"])
+        if len(bias.shape) == 1:
+            return bias.render([index])
+        raise FunctionalToLambdaError(f"Unsupported bias shape: {bias.shape}")
+
+    def normalize_reduction_dims(self, input_value: ValueRef, dim: Any) -> list[int]:
+        if dim is None:
+            return list(range(len(input_value.shape)))
+        if isinstance(dim, (list, tuple)):
+            return [int(item) for item in dim]
+        return [int(dim)]
 
     def unsqueeze(self, value: ValueRef, dim: int) -> ValueRef:
         rank = len(value.shape)
@@ -1472,7 +1520,7 @@ class LambdaLowerer:
     def lower_linear(self, node: ast.Call) -> ValueRef:
         input_value = self.lower_expr(node.args[0])
         weight = self.lower_expr(node.args[1])
-        bias = self.lower_expr(node.args[2]) if len(node.args) > 2 and not (isinstance(node.args[2], ast.Constant) and node.args[2].value is None) else None
+        bias = self.lower_optional_value(node.args[2] if len(node.args) > 2 else None)
         if len(input_value.shape) != 2 or len(weight.shape) != 2:
             raise FunctionalToLambdaError("Only rank-2 linear is supported")
         batch, in_features = input_value.shape
@@ -1487,14 +1535,15 @@ class LambdaLowerer:
                 summation = render_nested_cpp_sum([in_features], lambda vars_: self.fmt_mul(weight.render([o, vars_[0]]), input_value.render([b, vars_[0]])), "li_")
             else:
                 summation = render_nested_sum([in_features], lambda vars_: self.fmt_mul(weight.render([o, vars_[0]]), input_value.render([b, vars_[0]])), "li_")
-            return self.fmt_add(summation, bias.render([o])) if bias is not None else summation
+            bias_expr = self.render_optional_bias(bias, o)
+            return self.fmt_add(summation, bias_expr) if bias_expr is not None else summation
 
         return ValueRef(shape=out_shape, renderer=render)
 
     def lower_conv(self, node: ast.Call, transpose: bool) -> ValueRef:
         input_value = self.lower_expr(node.args[0])
         weight = self.lower_expr(node.args[1])
-        bias = self.lower_expr(node.args[2]) if len(node.args) > 2 and not (isinstance(node.args[2], ast.Constant) and node.args[2].value is None) else None
+        bias = self.lower_optional_value(node.args[2] if len(node.args) > 2 else None)
         spatial_ndim = len(input_value.shape) - 2
         stride = normalize_tuple(self.keyword_value(node, "stride", 1), spatial_ndim)
         padding = normalize_tuple(self.keyword_value(node, "padding", 0), spatial_ndim)
@@ -1541,7 +1590,8 @@ class LambdaLowerer:
                     conv_expr = render_nested_cpp_sum(reduce_bounds, body, "tconv_")
                 else:
                     conv_expr = render_nested_sum(reduce_bounds, body, "tconv_")
-                return self.fmt_add(conv_expr, bias.render([oc])) if bias is not None else conv_expr
+                bias_expr = self.render_optional_bias(bias, oc)
+                return self.fmt_add(conv_expr, bias_expr) if bias_expr is not None else conv_expr
 
             return ValueRef(shape=out_shape, renderer=render)
 
@@ -1570,7 +1620,12 @@ class LambdaLowerer:
                     affine_expr([(out_axis, stride[axis]), (k, dilation[axis])], -padding[axis])
                     for axis, (out_axis, k) in enumerate(zip(spatial, kernels))
                 ]
-                return self.fmt_mul(weight.render([oc, ic_local, *kernels]), input_value.render([b, ic_global, *input_coords]))
+                conds = [
+                    self.fmt_in_bounds(input_coords[idx], input_value.shape[2 + idx])
+                    for idx in range(spatial_ndim)
+                ]
+                prod_expr = self.fmt_mul(weight.render([oc, ic_local, *kernels]), input_value.render([b, ic_global, *input_coords]))
+                return self.fmt_if(self.fmt_and(conds), prod_expr, "zero")
 
             if self.backend == "smt":
                 conv_expr = render_nested_smt_sum(reduce_bounds, body, "conv_")
@@ -1578,9 +1633,20 @@ class LambdaLowerer:
                 conv_expr = render_nested_cpp_sum(reduce_bounds, body, "conv_")
             else:
                 conv_expr = render_nested_sum(reduce_bounds, body, "conv_")
-            return self.fmt_add(conv_expr, bias.render([oc])) if bias is not None else conv_expr
+            bias_expr = self.render_optional_bias(bias, oc)
+            return self.fmt_add(conv_expr, bias_expr) if bias_expr is not None else conv_expr
 
         return ValueRef(shape=out_shape, renderer=render)
+
+    def lower_mean(self, node: ast.Call, input_value: ValueRef, dim_arg_index: int) -> ValueRef:
+        dim = self.keyword_value(node, "dim")
+        if dim is None and len(node.args) > dim_arg_index:
+            dim = self.static_value(node.args[dim_arg_index])
+        keepdim = bool(self.keyword_value(node, "keepdim", False))
+        dims = self.normalize_reduction_dims(input_value, dim)
+        if not dims:
+            return input_value
+        return self.reduce_mean(input_value, dims, keepdim)
 
     def reduce_mean(self, input_value: ValueRef, dims: Sequence[int], keepdim: bool) -> ValueRef:
         out_shape = reduction_shape(input_value.shape, dims, keepdim)
@@ -1604,7 +1670,7 @@ class LambdaLowerer:
         if dim is None and len(node.args) > 1:
             dim = self.static_value(node.args[1])
         keepdim = bool(self.keyword_value(node, "keepdim", False))
-        dims = dim if isinstance(dim, (list, tuple)) else [dim]
+        dims = self.normalize_reduction_dims(input_value, dim)
         out_shape = reduction_shape(input_value.shape, dims, keepdim)
         bounds = [input_value.shape[d if d >= 0 else d + len(input_value.shape)] for d in dims]
 
@@ -1628,6 +1694,66 @@ class LambdaLowerer:
             )
 
         return ValueRef(shape=out_shape, renderer=render)
+
+    def lower_matmul(self, node: ast.Call) -> ValueRef:
+        lhs = self.lower_expr(node.args[0])
+        rhs = self.lower_expr(node.args[1])
+        if len(lhs.shape) != 2 or len(rhs.shape) != 2:
+            raise FunctionalToLambdaError("Only rank-2 torch.matmul is supported")
+        if lhs.shape[1] != rhs.shape[0]:
+            raise FunctionalToLambdaError(f"torch.matmul dimension mismatch: {lhs.shape} x {rhs.shape}")
+        m, k = lhs.shape
+        _, n = rhs.shape
+        out_shape = (m, n)
+
+        def render(coord: Sequence[str], lhs=lhs, rhs=rhs, k=k) -> str:
+            i, j = coord
+            if self.backend == "smt":
+                return render_nested_smt_sum([k], lambda vars_: self.fmt_mul(lhs.render([i, vars_[0]]), rhs.render([vars_[0], j])), "matmul_")
+            if self.backend == "cpp":
+                return render_nested_cpp_sum([k], lambda vars_: self.fmt_mul(lhs.render([i, vars_[0]]), rhs.render([vars_[0], j])), "matmul_")
+            return render_nested_sum([k], lambda vars_: self.fmt_mul(lhs.render([i, vars_[0]]), rhs.render([vars_[0], j])), "matmul_")
+
+        return ValueRef(shape=out_shape, renderer=render)
+
+    def lower_bmm(self, node: ast.Call) -> ValueRef:
+        lhs = self.lower_expr(node.args[0])
+        rhs = self.lower_expr(node.args[1])
+        if len(lhs.shape) != 3 or len(rhs.shape) != 3:
+            raise FunctionalToLambdaError("Only rank-3 torch.bmm is supported")
+        if lhs.shape[0] != rhs.shape[0] or lhs.shape[2] != rhs.shape[1]:
+            raise FunctionalToLambdaError(f"torch.bmm dimension mismatch: {lhs.shape} x {rhs.shape}")
+        batch, m, k = lhs.shape
+        _, _, n = rhs.shape
+        out_shape = (batch, m, n)
+
+        def render(coord: Sequence[str], lhs=lhs, rhs=rhs, k=k) -> str:
+            b, i, j = coord
+            if self.backend == "smt":
+                return render_nested_smt_sum([k], lambda vars_: self.fmt_mul(lhs.render([b, i, vars_[0]]), rhs.render([b, vars_[0], j])), "bmm_")
+            if self.backend == "cpp":
+                return render_nested_cpp_sum([k], lambda vars_: self.fmt_mul(lhs.render([b, i, vars_[0]]), rhs.render([b, vars_[0], j])), "bmm_")
+            return render_nested_sum([k], lambda vars_: self.fmt_mul(lhs.render([b, i, vars_[0]]), rhs.render([b, vars_[0], j])), "bmm_")
+
+        return ValueRef(shape=out_shape, renderer=render)
+
+    def lower_cumsum(self, node: ast.Call) -> ValueRef:
+        input_value = self.lower_expr(node.args[0])
+        dim = self.keyword_value(node, "dim")
+        if dim is None and len(node.args) > 1:
+            dim = self.static_value(node.args[1])
+        axis = dim if dim >= 0 else dim + len(input_value.shape)
+
+        def render(coord: Sequence[str], input_value=input_value, axis=axis) -> str:
+            limit_expr = f"({coord[axis]} + 1)"
+            body = lambda idx: input_value.render(list(coord[:axis]) + [idx] + list(coord[axis + 1 :]))
+            if self.backend == "smt":
+                return f"_smt_add(tuple(map(lambda cumsum_0: {body('cumsum_0')}, range({limit_expr}))))"
+            if self.backend == "cpp":
+                return f"_smt_add_range({limit_expr}, [&](long long cumsum_0) -> SmtString {{ return {body('cumsum_0')}; }})"
+            return f"sum(map(lambda cumsum_0: {body('cumsum_0')}, range({limit_expr})), zero)"
+
+        return ValueRef(shape=input_value.shape, renderer=render)
 
     def reduce_extreme(self, input_value: ValueRef, dim: int, keepdim: bool, kind: str) -> ValueRef:
         dims = [dim]
@@ -1668,6 +1794,20 @@ class LambdaLowerer:
         return ValueRef(
             shape=out_shape,
             renderer=lambda coord, lhs=lhs, rhs=rhs, out_shape=out_shape: self.fmt_min(
+                lhs.render(broadcast_coord(coord, out_shape, lhs.shape)),
+                rhs.render(broadcast_coord(coord, out_shape, rhs.shape)),
+            ),
+        )
+
+    def lower_torch_max(self, node: ast.Call) -> ValueRef:
+        if any(keyword.arg == "dim" for keyword in node.keywords) or len(node.args) == 2 and isinstance(node.args[1], ast.Name) and node.args[1].id == "dim":
+            raise FunctionalToLambdaError("torch.max(dim=...) must be indexed with [0]")
+        lhs = self.lower_expr(node.args[0])
+        rhs = self.lower_expr(node.args[1])
+        out_shape = broadcast_shape(lhs.shape, rhs.shape)
+        return ValueRef(
+            shape=out_shape,
+            renderer=lambda coord, lhs=lhs, rhs=rhs, out_shape=out_shape: self.fmt_max(
                 lhs.render(broadcast_coord(coord, out_shape, lhs.shape)),
                 rhs.render(broadcast_coord(coord, out_shape, rhs.shape)),
             ),
@@ -1723,6 +1863,19 @@ class LambdaLowerer:
                     "softmax_",
                 )
             return self.fmt_div(numer, denom)
+
+        return ValueRef(shape=input_value.shape, renderer=render)
+
+    def lower_leaky_relu(self, node: ast.Call) -> ValueRef:
+        input_value = self.lower_expr(node.args[0])
+        negative_slope = self.keyword_value(node, "negative_slope", 0.01)
+        if len(node.args) > 1:
+            negative_slope = self.static_value(node.args[1])
+        slope_expr = self.atom(py_literal(negative_slope))
+
+        def render(coord: Sequence[str], input_value=input_value, slope_expr=slope_expr) -> str:
+            expr = input_value.render(coord)
+            return self.fmt_if(self.fmt_le("0.0", expr), expr, self.fmt_mul(slope_expr, expr))
 
         return ValueRef(shape=input_value.shape, renderer=render)
 
@@ -1880,6 +2033,49 @@ class LambdaLowerer:
             if self.backend == "cpp":
                 return render_nested_cpp_extreme("max", list(kernel), body, "pool_")
             return render_nested_stack_reduce("max", list(kernel), body, "pool_")
+
+        return ValueRef(shape=out_shape, renderer=render)
+
+    def lower_avg_pool1d(self, node: ast.Call) -> ValueRef:
+        input_value = self.lower_expr(node.args[0])
+        if len(input_value.shape) != 3:
+            raise FunctionalToLambdaError("Only rank-3 avg_pool1d is supported")
+        kernel = normalize_tuple(self.keyword_value(node, "kernel_size", self.static_value(node.args[1]) if len(node.args) > 1 else None), 1)[0]
+        stride = normalize_tuple(self.keyword_value(node, "stride", kernel), 1)[0]
+        padding = normalize_tuple(self.keyword_value(node, "padding", 0), 1)[0]
+        ceil_mode = bool(self.keyword_value(node, "ceil_mode", False))
+        count_include_pad = bool(self.keyword_value(node, "count_include_pad", True))
+        out_length = pool_output_size(input_value.shape[2], kernel, stride, padding, 1, ceil_mode)
+        out_shape = (input_value.shape[0], input_value.shape[1], out_length)
+
+        def render(coord: Sequence[str], input_value=input_value, kernel=kernel, stride=stride, padding=padding, count_include_pad=count_include_pad) -> str:
+            b, c, out_x = coord
+
+            def input_coord_expr(k_var: str) -> str:
+                return affine_expr([(out_x, stride), (k_var, 1)], -padding)
+
+            def value_body(vars_: list[str]) -> str:
+                in_x = input_coord_expr(vars_[0])
+                return self.fmt_if(self.fmt_in_bounds(in_x, input_value.shape[2]), input_value.render([b, c, in_x]), "zero")
+
+            if self.backend == "smt":
+                total = render_nested_smt_sum([kernel], value_body, "avgp1_")
+            elif self.backend == "cpp":
+                total = render_nested_cpp_sum([kernel], value_body, "avgp1_")
+            else:
+                total = render_nested_sum([kernel], value_body, "avgp1_")
+
+            if count_include_pad:
+                denom = str(kernel)
+            else:
+                count_body = lambda vars_: self.fmt_if(self.fmt_in_bounds(input_coord_expr(vars_[0]), input_value.shape[2]), "1.0", "0.0")
+                if self.backend == "smt":
+                    denom = render_nested_smt_sum([kernel], count_body, "avgpc1_")
+                elif self.backend == "cpp":
+                    denom = render_nested_cpp_sum([kernel], count_body, "avgpc1_")
+                else:
+                    denom = render_nested_sum([kernel], count_body, "avgpc1_")
+            return self.fmt_div(total, denom)
 
         return ValueRef(shape=out_shape, renderer=render)
 
