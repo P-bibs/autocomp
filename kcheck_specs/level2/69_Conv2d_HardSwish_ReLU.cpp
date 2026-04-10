@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <charconv>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
 #include <iostream>
 #include <memory_resource>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using Coord = std::array<long long, 4>;
@@ -42,14 +44,84 @@ template <typename T>
 static inline void _smt_append_atom(SmtString& out, T value) {
     out += std::to_string(value);
 }
+template <typename T>
+static inline std::size_t _smt_integral_size(T value) {
+    char buffer[32];
+    auto [ptr, ec] = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    return ec == std::errc() ? static_cast<std::size_t>(ptr - buffer) : 0;
+}
+static inline std::size_t _smt_atom_size(const SmtString& value) {
+    return value.size();
+}
+static inline std::size_t _smt_atom_size(const char* value) {
+    return std::char_traits<char>::length(value);
+}
+static inline std::size_t _smt_atom_size(int value) {
+    return _smt_integral_size(value);
+}
+static inline std::size_t _smt_atom_size(long long value) {
+    return _smt_integral_size(value);
+}
+static inline std::size_t _smt_atom_size(unsigned long long value) {
+    return _smt_integral_size(value);
+}
+static inline std::size_t _smt_atom_size(bool value) {
+    return value ? 4 : 5;
+}
+template <typename T>
+static inline std::size_t _smt_atom_size(T value) {
+    return std::to_string(value).size();
+}
+static inline void _smt_extend_variadic(SmtString& result, const SmtString& term) {
+    result.reserve(result.size() + term.size() + 2);
+    result.pop_back();
+    result += ' ';
+    result += term;
+    result += ')';
+}
+template <typename A, typename B>
+static inline SmtString _smt_binary(const char* op, const A& a, const B& b) {
+    SmtString result;
+    result.reserve(std::char_traits<char>::length(op) + _smt_atom_size(a) + _smt_atom_size(b) + 4);
+    result += '(';
+    result += op;
+    result += ' ';
+    _smt_append_atom(result, a);
+    result += ' ';
+    _smt_append_atom(result, b);
+    result += ')';
+    return result;
+}
 template <typename... Args>
 static inline SmtString _smt_select(const char* name, const Args&... idxs) {
     constexpr std::size_t count = sizeof...(Args);
     if constexpr (count == 0) return SmtString(name);
+    std::size_t total = std::char_traits<char>::length(name) + count * 9;
+    auto add_idx_size = [&](const auto& idx) { total += _smt_atom_size(idx); };
+    (add_idx_size(idxs), ...);
     SmtString result;
-    result.reserve(std::char_traits<char>::length(name) + count * 16);
+    result.reserve(total);
     for (std::size_t i = 0; i < count; ++i) result += "(select ";
     result += name;
+    auto append_idx = [&](const auto& idx) {
+        result += ' ';
+        _smt_append_atom(result, idx);
+        result += ')';
+    };
+    (append_idx(idxs), ...);
+    return result;
+}
+template <typename... Args>
+static inline SmtString _smt_select_from(const SmtString& base, const Args&... idxs) {
+    constexpr std::size_t count = sizeof...(Args);
+    if constexpr (count == 0) return base;
+    std::size_t total = base.size() + count * 9;
+    auto add_idx_size = [&](const auto& idx) { total += _smt_atom_size(idx); };
+    (add_idx_size(idxs), ...);
+    SmtString result;
+    result.reserve(total);
+    for (std::size_t i = 0; i < count; ++i) result += "(select ";
+    result += base;
     auto append_idx = [&](const auto& idx) {
         result += ' ';
         _smt_append_atom(result, idx);
@@ -76,12 +148,7 @@ static inline SmtString _smt_add2(const A& a, const B& b) {
     _smt_append_atom(sb, b);
     if (sa == "0.0") return sb;
     if (sb == "0.0") return sa;
-    SmtString result = "(+ ";
-    result += sa;
-    result += ' ';
-    result += sb;
-    result += ')';
-    return result;
+    return _smt_binary("+", sa, sb);
 }
 template <typename B>
 static inline SmtString _smt_add2(SmtString a, const B& b) {
@@ -94,47 +161,22 @@ static inline SmtString _smt_add2(SmtString a, const B& b) {
     _smt_append_atom(sb, b);
     if (sb == "0.0") return a;
     if (a.size() >= 2 && a[0] == '(' && a[1] == '+') {
-        a.pop_back();
-        a += ' ';
-        a += sb;
-        a += ')';
+        _smt_extend_variadic(a, sb);
         return a;
     }
-    SmtString result;
-    result.reserve(a.size() + sb.size() + 5);
-    result += "(+ ";
-    result += a;
-    result += ' ';
-    result += sb;
-    result += ')';
-    return result;
+    return _smt_binary("+", a, sb);
 }
 template <typename A, typename B>
 static inline SmtString _smt_sub2(const A& a, const B& b) {
-    SmtString result = "(- ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("-", a, b);
 }
 template <typename A, typename B>
 static inline SmtString _smt_mul2(const A& a, const B& b) {
-    SmtString result = "(* ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("*", a, b);
 }
 template <typename A, typename B>
 static inline SmtString _smt_div2(const A& a, const B& b) {
-    SmtString result = "(/ ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("/", a, b);
 }
 template <typename A, typename B>
 static inline SmtString _smt_max2(const A& a, const B& b) {
@@ -144,12 +186,7 @@ static inline SmtString _smt_max2(const A& a, const B& b) {
     _smt_append_atom(sb, b);
     if (sa == "(- 1.0e309)") return sb;
     if (sb == "(- 1.0e309)") return sa;
-    SmtString result = "(max ";
-    result += sa;
-    result += ' ';
-    result += sb;
-    result += ')';
-    return result;
+    return _smt_binary("max", sa, sb);
 }
 template <typename B>
 static inline SmtString _smt_max2(SmtString a, const B& b) {
@@ -162,20 +199,10 @@ static inline SmtString _smt_max2(SmtString a, const B& b) {
     _smt_append_atom(sb, b);
     if (sb == "(- 1.0e309)") return a;
     if (a.size() >= 4 && a[0] == '(' && a[1] == 'm' && a[2] == 'a' && a[3] == 'x') {
-        a.pop_back();
-        a += ' ';
-        a += sb;
-        a += ')';
+        _smt_extend_variadic(a, sb);
         return a;
     }
-    SmtString result;
-    result.reserve(a.size() + sb.size() + 8);
-    result += "(max ";
-    result += a;
-    result += ' ';
-    result += sb;
-    result += ')';
-    return result;
+    return _smt_binary("max", a, sb);
 }
 template <typename A, typename B>
 static inline SmtString _smt_min2(const A& a, const B& b) {
@@ -185,12 +212,7 @@ static inline SmtString _smt_min2(const A& a, const B& b) {
     _smt_append_atom(sb, b);
     if (sa == "0.0") return sb;
     if (sb == "0.0") return sa;
-    SmtString result = "(min ";
-    result += sa;
-    result += ' ';
-    result += sb;
-    result += ')';
-    return result;
+    return _smt_binary("min", sa, sb);
 }
 template <typename B>
 static inline SmtString _smt_min2(SmtString a, const B& b) {
@@ -203,65 +225,30 @@ static inline SmtString _smt_min2(SmtString a, const B& b) {
     _smt_append_atom(sb, b);
     if (sb == "0.0") return a;
     if (a.size() >= 4 && a[0] == '(' && a[1] == 'm' && a[2] == 'i' && a[3] == 'n') {
-        a.pop_back();
-        a += ' ';
-        a += sb;
-        a += ')';
+        _smt_extend_variadic(a, sb);
         return a;
     }
-    SmtString result;
-    result.reserve(a.size() + sb.size() + 8);
-    result += "(min ";
-    result += a;
-    result += ' ';
-    result += sb;
-    result += ')';
-    return result;
+    return _smt_binary("min", a, sb);
 }
 template <typename A, typename B>
 static inline SmtString _smt_eq(const A& a, const B& b) {
-    SmtString result = "(= ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("=", a, b);
 }
 template <typename A, typename B>
 static inline SmtString _smt_le(const A& a, const B& b) {
-    SmtString result = "(<= ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("<=", a, b);
 }
 template <typename A, typename B>
 static inline SmtString _smt_lt(const A& a, const B& b) {
-    SmtString result = "(< ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("<", a, b);
 }
 template <typename A, typename B>
 static inline SmtString _smt_mod(const A& a, const B& b) {
-    SmtString result = "(mod ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("mod", a, b);
 }
 template <typename A, typename B>
 static inline SmtString _smt_int_div(const A& a, const B& b) {
-    SmtString result = "(_ div ";
-    _smt_append_atom(result, a);
-    result += ' ';
-    _smt_append_atom(result, b);
-    result += ')';
-    return result;
+    return _smt_binary("_ div", a, b);
 }
 static inline SmtString _smt_ite(const SmtString& cond, const SmtString& true_expr, const SmtString& false_expr) {
     SmtString result;
@@ -385,12 +372,10 @@ static inline SmtString _smt_max_range(long long n, F f) {
             continue;
         }
         if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'a' && result[3] == 'x') {
-            result.pop_back();
-            result += ' ';
-            result += term;
-            result += ')';
+            _smt_extend_variadic(result, term);
         } else {
             SmtString next = "(max ";
+            next.reserve(result.size() + term.size() + 8);
             next += result;
             next += ' ';
             next += term;
@@ -414,12 +399,10 @@ static inline SmtString _smt_max_nd(const std::array<long long, Rank>& bounds, F
                 result = std::move(term);
                 has_term = true;
             } else if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'a' && result[3] == 'x') {
-                result.pop_back();
-                result += ' ';
-                result += term;
-                result += ')';
+                _smt_extend_variadic(result, term);
             } else {
                 SmtString next = "(max ";
+                next.reserve(result.size() + term.size() + 8);
                 next += result;
                 next += ' ';
                 next += term;
@@ -452,12 +435,10 @@ static inline SmtString _smt_min_range(long long n, F f) {
             continue;
         }
         if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'i' && result[3] == 'n') {
-            result.pop_back();
-            result += ' ';
-            result += term;
-            result += ')';
+            _smt_extend_variadic(result, term);
         } else {
             SmtString next = "(min ";
+            next.reserve(result.size() + term.size() + 8);
             next += result;
             next += ' ';
             next += term;
@@ -481,12 +462,10 @@ static inline SmtString _smt_min_nd(const std::array<long long, Rank>& bounds, F
                 result = std::move(term);
                 has_term = true;
             } else if (result.size() >= 4 && result[0] == '(' && result[1] == 'm' && result[2] == 'i' && result[3] == 'n') {
-                result.pop_back();
-                result += ' ';
-                result += term;
-                result += ')';
+                _smt_extend_variadic(result, term);
             } else {
                 SmtString next = "(min ";
+                next.reserve(result.size() + term.size() + 8);
                 next += result;
                 next += ' ';
                 next += term;
@@ -504,6 +483,44 @@ static inline SmtString _smt_min_nd(const std::array<long long, Rank>& bounds, F
 next_index:;
     }
     return has_term ? result : SmtString("0.0");
+}
+
+static inline const SmtString& _smt_runtime_cached_select_x(long long i0, long long i1, long long i2, long long i3, SmtString** cache) {
+    const std::size_t flat = ((((((static_cast<std::size_t>(i0)) * 8ULL + static_cast<std::size_t>(i1))) * 128ULL + static_cast<std::size_t>(i2))) * 128ULL + static_cast<std::size_t>(i3));
+    if (cache[flat] != nullptr) return *cache[flat];
+    cache[flat] = new SmtString(_smt_select("x", i0, i1, i2, i3));
+    return *cache[flat];
+}
+
+static inline const SmtString& _smt_cached_select_conv_bias(long long i0) {
+    static const auto* cache = []() {
+        auto* values = new std::array<SmtString, 64>{};
+        std::size_t flat = 0;
+        for (long long i0 = 0; i0 < 64LL; ++i0) {
+            (*values)[flat++] = _smt_select("conv_bias", i0);
+        }
+        return values;
+    }();
+    return (*cache)[static_cast<std::size_t>(i0)];
+}
+
+static inline const SmtString& _smt_cached_prefix_x(long long i0) {
+    static auto** cache = []() {
+        return new SmtString*[128ULL]();
+    }();
+    const std::size_t flat = static_cast<std::size_t>(i0);
+    if (cache[flat] != nullptr) return *cache[flat];
+    cache[flat] = new SmtString(_smt_select("x", i0));
+    return *cache[flat];
+}
+static inline const SmtString& _smt_cached_prefix_conv_weight(long long i0) {
+    static auto** cache = []() {
+        return new SmtString*[64ULL]();
+    }();
+    const std::size_t flat = static_cast<std::size_t>(i0);
+    if (cache[flat] != nullptr) return *cache[flat];
+    cache[flat] = new SmtString(_smt_select("conv_weight", i0));
+    return *cache[flat];
 }
 
 static constexpr long long kOutputSize = 130056192LL;
@@ -524,10 +541,17 @@ SmtString value_at(long long flat_coord) {
     coord[1] = remaining % 64LL;
     remaining /= 64LL;
     coord[0] = remaining % 128LL;
+    auto** _smt_cache_x = new SmtString*[16777216ULL]();
 
-    const auto v1 = [&](long long c0, long long c1, long long c2, long long c3) -> SmtString { return _smt_add2(_smt_add_nd<3>({8, 3, 3}, [&](const auto& idx) -> SmtString { return _smt_mul2(_smt_select("conv_weight", c1, idx[0], idx[1], idx[2]), _smt_select("x", c0, idx[0], (c2 + idx[1]), (c3 + idx[2]))); }), _smt_select("conv_bias", c1)); };
-    const auto v2 = [&](long long c0, long long c1, long long c2, long long c3) -> SmtString { return _smt_div2(_smt_mul2(v1(c0, c1, c2, c3), _smt_min2(_smt_max2(_smt_add2(v1(c0, c1, c2, c3), 3.0), 0.0), 6.0)), 6.0); };
-    const auto v3 = [&](long long c0, long long c1, long long c2, long long c3) -> SmtString { return _smt_max2(0.0, v2(c0, c1, c2, c3)); };
+    auto** v1_cache = new SmtString*[130056192ULL]();
+    const auto v1_impl = [&](long long c0, long long c1, long long c2, long long c3) -> SmtString { return _smt_add2(_smt_add_nd<3>({8, 3, 3}, [&](const auto& idx) -> SmtString { return ((((((0) <= ((c2 + idx[1]))) && (((c2 + idx[1])) < (128))) && (((0) <= ((c3 + idx[2]))) && (((c3 + idx[2])) < (128))))) ? (_smt_mul2(_smt_select_from(_smt_cached_prefix_conv_weight(c1), idx[0], idx[1], idx[2]), _smt_runtime_cached_select_x(c0, idx[0], (c2 + idx[1]), (c3 + idx[2]), _smt_cache_x))) : (zero)); }), _smt_cached_select_conv_bias(c1)); };
+    const auto v1 = [&](long long c0, long long c1, long long c2, long long c3) -> const SmtString& { const std::size_t flat = ((((((static_cast<std::size_t>(c0)) * 64ULL + static_cast<std::size_t>(c1))) * 126ULL + static_cast<std::size_t>(c2))) * 126ULL + static_cast<std::size_t>(c3)); if (v1_cache[flat] != nullptr) return *v1_cache[flat]; v1_cache[flat] = new SmtString(v1_impl(c0, c1, c2, c3)); return *v1_cache[flat]; };
+    auto** v2_cache = new SmtString*[130056192ULL]();
+    const auto v2_impl = [&](long long c0, long long c1, long long c2, long long c3) -> SmtString { return _smt_div2(_smt_mul2(v1(c0, c1, c2, c3), _smt_min2(_smt_max2(_smt_add2(v1(c0, c1, c2, c3), 3.0), 0.0), 6.0)), 6.0); };
+    const auto v2 = [&](long long c0, long long c1, long long c2, long long c3) -> const SmtString& { const std::size_t flat = ((((((static_cast<std::size_t>(c0)) * 64ULL + static_cast<std::size_t>(c1))) * 126ULL + static_cast<std::size_t>(c2))) * 126ULL + static_cast<std::size_t>(c3)); if (v2_cache[flat] != nullptr) return *v2_cache[flat]; v2_cache[flat] = new SmtString(v2_impl(c0, c1, c2, c3)); return *v2_cache[flat]; };
+    auto** v3_cache = new SmtString*[130056192ULL]();
+    const auto v3_impl = [&](long long c0, long long c1, long long c2, long long c3) -> SmtString { return _smt_max2(0.0, v2(c0, c1, c2, c3)); };
+    const auto v3 = [&](long long c0, long long c1, long long c2, long long c3) -> const SmtString& { const std::size_t flat = ((((((static_cast<std::size_t>(c0)) * 64ULL + static_cast<std::size_t>(c1))) * 126ULL + static_cast<std::size_t>(c2))) * 126ULL + static_cast<std::size_t>(c3)); if (v3_cache[flat] != nullptr) return *v3_cache[flat]; v3_cache[flat] = new SmtString(v3_impl(c0, c1, c2, c3)); return *v3_cache[flat]; };
     return v3(coord[0], coord[1], coord[2], coord[3]);
 }
 
@@ -543,6 +567,9 @@ int main(int argc, char** argv) {
         std::cerr << "flat coordinate out of range: expected in [0, " << kOutputSize << "), got " << flat_coord << '\n';
         return 1;
     }
-    std::cout << value_at(flat_coord) << '\n';
-    return 0;
+    const SmtString result = value_at(flat_coord);
+    std::fwrite(result.data(), 1, result.size(), stdout);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+    std::_Exit(0);
 }
