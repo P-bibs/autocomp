@@ -1,0 +1,55 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 524288,
+    "trace_const_001": 4095
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_Max_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_6edc74ac_7_cuda_cu_edbcb9fc4cuda3std3__439_GLOBAL__N__6edc74ac_7_cuda_cu_edbcb9fc6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6edc74ac_7_cuda_cu_edbcb9fc4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6edc74ac_7_cuda_cu_edbcb9fc4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6edc74ac_7_cuda_cu_edbcb9fc4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6edc74ac_7_cuda_cu_edbcb9fc4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6edc74ac_7_cuda_cu_edbcb9fc6thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z17max_reduce_kernelPKfPfii(\n.param .u64 _Z17max_reduce_kernelPKfPfii_param_0,\n.param .u64 _Z17max_reduce_kernelPKfPfii_param_1,\n.param .u32 _Z17max_reduce_kernelPKfPfii_param_2,\n.param .u32 _Z17max_reduce_kernelPKfPfii_param_3\n)\n{\n.reg .pred %p<14>;\n.reg .f32 %f<37>;\n.reg .b32 %r<13>;\n.reg .b64 %rd<12>;\n//\n.shared .align 4 .b8 _ZZ17max_reduce_kernelPKfPfiiE5sdata[2048];\n\nld.param.u64 %rd3, [_Z17max_reduce_kernelPKfPfii_param_0];\nld.param.u64 %rd4, [_Z17max_reduce_kernelPKfPfii_param_1];\nld.param.u32 %r8, [_Z17max_reduce_kernelPKfPfii_param_2];\nld.param.u32 %r7, [_Z17max_reduce_kernelPKfPfii_param_3];\nmov.u32 %r1, %ctaid.x;\nsetp.ge.s32 %p1, %r1, %r8;\n@%p1 bra $L__BB0_24;\n\nmov.u32 %r2, %tid.x;\nsetp.ge.s32 %p2, %r2, %r7;\nmov.f32 %f36, 0fFF7FFFFF;\n@%p2 bra $L__BB0_4;\n\nmov.u32 %r3, %ntid.x;\ncvta.to.global.u64 %rd1, %rd3;\nmul.lo.s32 %r9, %r1, %r7;\ncvt.s64.s32 %rd2, %r9;\nmov.f32 %f36, 0fFF7FFFFF;\nmov.u32 %r12, %r2;\n\n$L__BB0_3:\ncvt.s64.s32 %rd5, %r12;\nadd.s64 %rd6, %rd5, %rd2;\nshl.b64 %rd7, %rd6, 2;\nadd.s64 %rd8, %rd1, %rd7;\nld.global.nc.f32 %f6, [%rd8];\nmax.ftz.f32 %f36, %f36, %f6;\nadd.s32 %r12, %r12, %r3;\nsetp.lt.s32 %p3, %r12, %r7;\n@%p3 bra $L__BB0_3;\n\n$L__BB0_4:\nshl.b32 %r10, %r2, 2;\nmov.u32 %r11, _ZZ17max_reduce_kernelPKfPfiiE5sdata;\nadd.s32 %r6, %r11, %r10;\nst.shared.f32 [%r6], %f36;\nbar.sync 0;\nsetp.gt.u32 %p4, %r2, 255;\n@%p4 bra $L__BB0_6;\n\nld.shared.f32 %f7, [%r6];\nld.shared.f32 %f8, [%r6+1024];\nmax.ftz.f32 %f9, %f7, %f8;\nst.shared.f32 [%r6], %f9;\n\n$L__BB0_6:\nbar.sync 0;\nsetp.gt.u32 %p5, %r2, 127;\n@%p5 bra $L__BB0_8;\n\nld.shared.f32 %f10, [%r6];\nld.shared.f32 %f11, [%r6+512];\nmax.ftz.f32 %f12, %f10, %f11;\nst.shared.f32 [%r6], %f12;\n\n$L__BB0_8:\nbar.sync 0;\nsetp.gt.u32 %p6, %r2, 63;\n@%p6 bra $L__BB0_10;\n\nld.shared.f32 %f13, [%r6];\nld.shared.f32 %f14, [%r6+256];\nmax.ftz.f32 %f15, %f13, %f14;\nst.shared.f32 [%r6], %f15;\n\n$L__BB0_10:\nbar.sync 0;\nsetp.gt.u32 %p7, %r2, 31;\n@%p7 bra $L__BB0_12;\n\nld.shared.f32 %f16, [%r6];\nld.shared.f32 %f17, [%r6+128];\nmax.ftz.f32 %f18, %f16, %f17;\nst.shared.f32 [%r6], %f18;\n\n$L__BB0_12:\nbar.sync 0;\nsetp.gt.u32 %p8, %r2, 15;\n@%p8 bra $L__BB0_14;\n\nld.shared.f32 %f19, [%r6];\nld.shared.f32 %f20, [%r6+64];\nmax.ftz.f32 %f21, %f19, %f20;\nst.shared.f32 [%r6], %f21;\n\n$L__BB0_14:\nbar.sync 0;\nsetp.gt.u32 %p9, %r2, 7;\n@%p9 bra $L__BB0_16;\n\nld.shared.f32 %f22, [%r6];\nld.shared.f32 %f23, [%r6+32];\nmax.ftz.f32 %f24, %f22, %f23;\nst.shared.f32 [%r6], %f24;\n\n$L__BB0_16:\nbar.sync 0;\nsetp.gt.u32 %p10, %r2, 3;\n@%p10 bra $L__BB0_18;\n\nld.shared.f32 %f25, [%r6];\nld.shared.f32 %f26, [%r6+16];\nmax.ftz.f32 %f27, %f25, %f26;\nst.shared.f32 [%r6], %f27;\n\n$L__BB0_18:\nbar.sync 0;\nsetp.gt.u32 %p11, %r2, 1;\n@%p11 bra $L__BB0_20;\n\nld.shared.f32 %f28, [%r6];\nld.shared.f32 %f29, [%r6+8];\nmax.ftz.f32 %f30, %f28, %f29;\nst.shared.f32 [%r6], %f30;\n\n$L__BB0_20:\nbar.sync 0;\nsetp.ne.s32 %p12, %r2, 0;\n@%p12 bra $L__BB0_22;\n\nld.shared.f32 %f31, [%r6];\nld.shared.f32 %f32, [_ZZ17max_reduce_kernelPKfPfiiE5sdata+4];\nmax.ftz.f32 %f33, %f31, %f32;\nst.shared.f32 [%r6], %f33;\n\n$L__BB0_22:\nbar.sync 0;\n@%p12 bra $L__BB0_24;\n\nld.shared.f32 %f34, [_ZZ17max_reduce_kernelPKfPfiiE5sdata];\ncvta.to.global.u64 %rd9, %rd4;\nmul.wide.s32 %rd10, %r1, 4;\nadd.s64 %rd11, %rd9, %rd10;\nst.global.f32 [%rd11], %f34;\n\n$L__BB0_24:\nret;\n\n}",
+          "kernel": "_Z17max_reduce_kernelPKfPfii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            524288,
+            1,
+            1
+          ],
+          "block_dim": [
+            512,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,55 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 524160,
+    "trace_const_001": 4096
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_Max_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_0e38f549_7_cuda_cu_70e322174cuda3std3__439_GLOBAL__N__0e38f549_7_cuda_cu_70e322176ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_0e38f549_7_cuda_cu_70e322174cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_0e38f549_7_cuda_cu_70e322174cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_0e38f549_7_cuda_cu_70e322174cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_0e38f549_7_cuda_cu_70e322174cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_0e38f549_7_cuda_cu_70e322176thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n.extern .shared .align 16 .b8 sdata[];\n\n.visible .entry _Z19max_last_dim_kernelPKfPfii(\n.param .u64 _Z19max_last_dim_kernelPKfPfii_param_0,\n.param .u64 _Z19max_last_dim_kernelPKfPfii_param_1,\n.param .u32 _Z19max_last_dim_kernelPKfPfii_param_2,\n.param .u32 _Z19max_last_dim_kernelPKfPfii_param_3\n)\n{\n.reg .pred %p<10>;\n.reg .f32 %f<12>;\n.reg .b32 %r<19>;\n.reg .b64 %rd<14>;\n\n\nld.param.u64 %rd4, [_Z19max_last_dim_kernelPKfPfii_param_0];\nld.param.u64 %rd5, [_Z19max_last_dim_kernelPKfPfii_param_1];\nld.param.u32 %r11, [_Z19max_last_dim_kernelPKfPfii_param_2];\nld.param.u32 %r10, [_Z19max_last_dim_kernelPKfPfii_param_3];\nmov.u32 %r1, %ctaid.x;\nsetp.ge.s32 %p1, %r1, %r11;\n@%p1 bra $L__BB0_12;\n\nmov.u32 %r2, %tid.x;\ncvt.s64.s32 %rd1, %r1;\nsetp.lt.s32 %p2, %r2, %r10;\n@%p2 bra $L__BB0_3;\nbra.uni $L__BB0_2;\n\n$L__BB0_3:\nmov.u32 %r3, %ntid.x;\ncvta.to.global.u64 %rd2, %rd4;\ncvt.s64.s32 %rd6, %r10;\nmul.lo.s64 %rd3, %rd6, %rd1;\nmov.f32 %f11, 0fFF7FFFFF;\nmov.u32 %r17, %r2;\n\n$L__BB0_4:\ncvt.s64.s32 %rd7, %r17;\nadd.s64 %rd8, %rd3, %rd7;\nshl.b64 %rd9, %rd8, 2;\nadd.s64 %rd10, %rd2, %rd9;\nld.global.nc.f32 %f7, [%rd10];\nsetp.gt.ftz.f32 %p3, %f7, %f11;\nselp.f32 %f11, %f7, %f11, %p3;\nadd.s32 %r17, %r17, %r3;\nsetp.lt.s32 %p4, %r17, %r10;\n@%p4 bra $L__BB0_4;\nbra.uni $L__BB0_5;\n\n$L__BB0_2:\nmov.f32 %f11, 0fFF7FFFFF;\n\n$L__BB0_5:\nshl.b32 %r12, %r2, 2;\nmov.u32 %r13, sdata;\nadd.s32 %r6, %r13, %r12;\nst.shared.f32 [%r6], %f11;\nbar.sync 0;\nmov.u32 %r14, %ntid.x;\nshr.u32 %r18, %r14, 1;\nsetp.eq.s32 %p5, %r18, 0;\n@%p5 bra $L__BB0_10;\n\n$L__BB0_6:\nsetp.ge.u32 %p6, %r2, %r18;\n@%p6 bra $L__BB0_9;\n\nshl.b32 %r15, %r18, 2;\nadd.s32 %r16, %r6, %r15;\nld.shared.f32 %f8, [%r6];\nld.shared.f32 %f4, [%r16];\nsetp.leu.ftz.f32 %p7, %f4, %f8;\n@%p7 bra $L__BB0_9;\n\nst.shared.f32 [%r6], %f4;\n\n$L__BB0_9:\nbar.sync 0;\nshr.u32 %r18, %r18, 1;\nsetp.ne.s32 %p8, %r18, 0;\n@%p8 bra $L__BB0_6;\n\n$L__BB0_10:\nsetp.ne.s32 %p9, %r2, 0;\n@%p9 bra $L__BB0_12;\n\nld.shared.f32 %f9, [sdata];\ncvta.to.global.u64 %rd11, %rd5;\nshl.b64 %rd12, %rd1, 2;\nadd.s64 %rd13, %rd11, %rd12;\nst.global.f32 [%rd13], %f9;\n\n$L__BB0_12:\nret;\n\n}",
+          "kernel": "_Z19max_last_dim_kernelPKfPfii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            524160,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

@@ -1,0 +1,59 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 4096,
+    "trace_const_002": 4095,
+    "trace_const_003": 1
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "47_Sum_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_a115b69c_7_cuda_cu_3f7b116d4cuda3std3__439_GLOBAL__N__a115b69c_7_cuda_cu_3f7b116d6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a115b69c_7_cuda_cu_3f7b116d4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a115b69c_7_cuda_cu_3f7b116d4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a115b69c_7_cuda_cu_3f7b116d4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a115b69c_7_cuda_cu_3f7b116d4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_a115b69c_7_cuda_cu_3f7b116d6thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n.extern .shared .align 16 .b8 shared_data[];\n\n.visible .entry _Z17sum_reduce_kernelPKfPfiiii(\n.param .u64 _Z17sum_reduce_kernelPKfPfiiii_param_0,\n.param .u64 _Z17sum_reduce_kernelPKfPfiiii_param_1,\n.param .u32 _Z17sum_reduce_kernelPKfPfiiii_param_2,\n.param .u32 _Z17sum_reduce_kernelPKfPfiiii_param_3,\n.param .u32 _Z17sum_reduce_kernelPKfPfiiii_param_4,\n.param .u32 _Z17sum_reduce_kernelPKfPfiiii_param_5\n)\n{\n.reg .pred %p<20>;\n.reg .f32 %f<37>;\n.reg .b32 %r<58>;\n.reg .b64 %rd<19>;\n\n\nld.param.u64 %rd4, [_Z17sum_reduce_kernelPKfPfiiii_param_0];\nld.param.u64 %rd5, [_Z17sum_reduce_kernelPKfPfiiii_param_1];\nld.param.u32 %r29, [_Z17sum_reduce_kernelPKfPfiiii_param_2];\nld.param.u32 %r30, [_Z17sum_reduce_kernelPKfPfiiii_param_3];\nld.param.u32 %r31, [_Z17sum_reduce_kernelPKfPfiiii_param_4];\nld.param.u32 %r32, [_Z17sum_reduce_kernelPKfPfiiii_param_5];\ncvta.to.global.u64 %rd1, %rd4;\ncvta.to.global.u64 %rd2, %rd5;\nmov.u32 %r1, %tid.x;\nsetp.eq.s32 %p1, %r32, 1;\n@%p1 bra $L__BB0_13;\n\nsetp.ne.s32 %p2, %r32, 2;\n@%p2 bra $L__BB0_22;\n\nmov.u32 %r2, %ctaid.y;\nsetp.ge.s32 %p3, %r2, %r29;\nmov.u32 %r3, %ctaid.x;\nsetp.ge.s32 %p4, %r3, %r30;\nor.pred %p5, %p3, %p4;\n@%p5 bra $L__BB0_22;\n\nsetp.lt.s32 %p6, %r1, %r31;\n@%p6 bra $L__BB0_5;\nbra.uni $L__BB0_4;\n\n$L__BB0_5:\nmad.lo.s32 %r33, %r2, %r30, %r3;\nmul.lo.s32 %r4, %r33, %r31;\nmov.f32 %f31, 0f00000000;\nmov.u32 %r5, %ntid.x;\nmov.u32 %r51, %r1;\n\n$L__BB0_6:\nadd.s32 %r34, %r51, %r4;\nmul.wide.s32 %rd6, %r34, 4;\nadd.s64 %rd7, %rd1, %rd6;\nld.global.nc.f32 %f13, [%rd7];\nadd.ftz.f32 %f31, %f31, %f13;\nadd.s32 %r51, %r51, %r5;\nsetp.lt.s32 %p7, %r51, %r31;\n@%p7 bra $L__BB0_6;\nbra.uni $L__BB0_7;\n\n$L__BB0_13:\nmov.u32 %r12, %ctaid.y;\nmov.u32 %r41, %ntid.x;\nmov.u32 %r42, %ctaid.x;\nmul.lo.s32 %r13, %r42, %r41;\nadd.s32 %r14, %r13, %r1;\nsetp.ge.s32 %p12, %r12, %r29;\nsetp.ge.s32 %p13, %r14, %r31;\nor.pred %p14, %p12, %p13;\n@%p14 bra $L__BB0_22;\n\nsetp.lt.s32 %p15, %r30, 1;\nmov.f32 %f36, 0f00000000;\n@%p15 bra $L__BB0_21;\n\nadd.s32 %r44, %r30, -1;\nand.b32 %r57, %r30, 3;\nsetp.lt.u32 %p16, %r44, 3;\nmov.f32 %f36, 0f00000000;\nmov.u32 %r55, 0;\n@%p16 bra $L__BB0_18;\n\nshl.b32 %r16, %r31, 2;\nmul.lo.s32 %r46, %r12, %r31;\nmad.lo.s32 %r47, %r46, %r30, %r1;\nadd.s32 %r53, %r47, %r13;\nsub.s32 %r18, %r57, %r30;\nmul.wide.s32 %rd3, %r31, 4;\nmov.f32 %f36, 0f00000000;\nmov.u32 %r55, 0;\n\n$L__BB0_17:\nmul.wide.s32 %rd10, %r53, 4;\nadd.s64 %rd11, %rd1, %rd10;\nld.global.nc.f32 %f22, [%rd11];\nadd.ftz.f32 %f23, %f36, %f22;\nadd.s64 %rd12, %rd11, %rd3;\nld.global.nc.f32 %f24, [%rd12];\nadd.ftz.f32 %f25, %f23, %f24;\nadd.s64 %rd13, %rd12, %rd3;\nld.global.nc.f32 %f26, [%rd13];\nadd.ftz.f32 %f27, %f25, %f26;\nadd.s64 %rd14, %rd13, %rd3;\nld.global.nc.f32 %f28, [%rd14];\nadd.ftz.f32 %f36, %f27, %f28;\nadd.s32 %r53, %r53, %r16;\nadd.s32 %r55, %r55, 4;\nadd.s32 %r48, %r18, %r55;\nsetp.ne.s32 %p17, %r48, 0;\n@%p17 bra $L__BB0_17;\n\n$L__BB0_18:\nsetp.eq.s32 %p18, %r57, 0;\n@%p18 bra $L__BB0_21;\n\nmad.lo.s32 %r49, %r12, %r30, %r55;\nmad.lo.s32 %r56, %r31, %r49, %r14;\n\n$L__BB0_20:\n.pragma \"nounroll\";\nmul.wide.s32 %rd15, %r56, 4;\nadd.s64 %rd16, %rd1, %rd15;\nld.global.nc.f32 %f29, [%rd16];\nadd.ftz.f32 %f36, %f36, %f29;\nadd.s32 %r56, %r56, %r31;\nadd.s32 %r57, %r57, -1;\nsetp.ne.s32 %p19, %r57, 0;\n@%p19 bra $L__BB0_20;\n\n$L__BB0_21:\nmad.lo.s32 %r50, %r12, %r31, %r14;\nmul.wide.s32 %rd17, %r50, 4;\nadd.s64 %rd18, %rd2, %rd17;\nst.global.f32 [%rd18], %f36;\nbra.uni $L__BB0_22;\n\n$L__BB0_4:\nmov.f32 %f31, 0f00000000;\n\n$L__BB0_7:\nshl.b32 %r35, %r1, 2;\nmov.u32 %r36, shared_data;\nadd.s32 %r8, %r36, %r35;\nst.shared.f32 [%r8], %f31;\nbar.sync 0;\nmov.u32 %r37, %ntid.x;\nshr.u32 %r52, %r37, 1;\nsetp.eq.s32 %p8, %r52, 0;\n@%p8 bra $L__BB0_11;\n\n$L__BB0_8:\nsetp.ge.s32 %p9, %r1, %r52;\n@%p9 bra $L__BB0_10;\n\nshl.b32 %r38, %r52, 2;\nadd.s32 %r39, %r8, %r38;\nld.shared.f32 %f14, [%r8];\nld.shared.f32 %f15, [%r39];\nadd.ftz.f32 %f16, %f15, %f14;\nst.shared.f32 [%r8], %f16;\n\n$L__BB0_10:\nbar.sync 0;\nshr.u32 %r52, %r52, 1;\nsetp.ne.s32 %p10, %r52, 0;\n@%p10 bra $L__BB0_8;\n\n$L__BB0_11:\nsetp.ne.s32 %p11, %r1, 0;\n@%p11 bra $L__BB0_22;\n\nmad.lo.s32 %r40, %r2, %r30, %r3;\nld.shared.f32 %f17, [shared_data];\nmul.wide.s32 %rd8, %r40, 4;\nadd.s64 %rd9, %rd2, %rd8;\nst.global.f32 [%rd9], %f17;\n\n$L__BB0_22:\nret;\n\n}",
+          "kernel": "_Z17sum_reduce_kernelPKfPfiiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_003"
+          ],
+          "grid_dim": [
+            8,
+            128,
+            1
+          ],
+          "block_dim": [
+            512,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

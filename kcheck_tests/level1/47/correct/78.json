@@ -1,0 +1,57 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 4096,
+    "trace_const_002": 4095
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "47_Sum_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_98282ca8_7_cuda_cu_4c48154c4cuda3std3__439_GLOBAL__N__98282ca8_7_cuda_cu_4c48154c6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_98282ca8_7_cuda_cu_4c48154c4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_98282ca8_7_cuda_cu_4c48154c4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_98282ca8_7_cuda_cu_4c48154c4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_98282ca8_7_cuda_cu_4c48154c4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_98282ca8_7_cuda_cu_4c48154c6thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z19sum_dim1_opt_kernelPKfPfiii(\n.param .u64 _Z19sum_dim1_opt_kernelPKfPfiii_param_0,\n.param .u64 _Z19sum_dim1_opt_kernelPKfPfiii_param_1,\n.param .u32 _Z19sum_dim1_opt_kernelPKfPfiii_param_2,\n.param .u32 _Z19sum_dim1_opt_kernelPKfPfiii_param_3,\n.param .u32 _Z19sum_dim1_opt_kernelPKfPfiii_param_4\n)\n{\n.reg .pred %p<7>;\n.reg .f32 %f<25>;\n.reg .b32 %r<28>;\n.reg .b64 %rd<37>;\n\n\nld.param.u64 %rd15, [_Z19sum_dim1_opt_kernelPKfPfiii_param_0];\nld.param.u64 %rd14, [_Z19sum_dim1_opt_kernelPKfPfiii_param_1];\nld.param.u32 %r14, [_Z19sum_dim1_opt_kernelPKfPfiii_param_2];\nld.param.u32 %r12, [_Z19sum_dim1_opt_kernelPKfPfiii_param_3];\nld.param.u32 %r13, [_Z19sum_dim1_opt_kernelPKfPfiii_param_4];\ncvta.to.global.u64 %rd1, %rd15;\nmov.u32 %r15, %ntid.x;\nmov.u32 %r16, %ctaid.x;\nmov.u32 %r17, %tid.x;\nmad.lo.s32 %r1, %r16, %r15, %r17;\nmul.lo.s32 %r18, %r13, %r14;\nsetp.ge.s32 %p1, %r1, %r18;\n@%p1 bra $L__BB0_10;\n\ndiv.s32 %r19, %r1, %r13;\nmul.lo.s32 %r20, %r19, %r13;\nsub.s32 %r2, %r1, %r20;\ncvt.s64.s32 %rd2, %r19;\ncvt.s64.s32 %rd3, %r12;\ncvt.s64.s32 %rd4, %r13;\nsetp.gt.s32 %p2, %r12, 0;\n@%p2 bra $L__BB0_3;\nbra.uni $L__BB0_2;\n\n$L__BB0_3:\ncvt.s64.s32 %rd5, %r2;\nand.b32 %r27, %r12, 3;\nadd.s32 %r22, %r12, -1;\nsetp.lt.u32 %p3, %r22, 3;\nmov.f32 %f24, 0f00000000;\nmov.u32 %r26, 0;\n@%p3 bra $L__BB0_6;\n\nsub.s32 %r25, %r12, %r27;\nmul.lo.s64 %rd16, %rd2, %rd4;\nmul.lo.s64 %rd17, %rd16, %rd3;\nadd.s64 %rd18, %rd17, %rd5;\nshl.b64 %rd19, %rd18, 2;\nadd.s64 %rd35, %rd1, %rd19;\nshl.b64 %rd7, %rd4, 2;\nmov.f32 %f24, 0f00000000;\nmov.u32 %r26, 0;\n\n$L__BB0_5:\nld.global.nc.f32 %f12, [%rd35];\nadd.ftz.f32 %f13, %f24, %f12;\nadd.s64 %rd20, %rd35, %rd7;\nld.global.nc.f32 %f14, [%rd20];\nadd.ftz.f32 %f15, %f13, %f14;\nadd.s64 %rd21, %rd20, %rd7;\nld.global.nc.f32 %f16, [%rd21];\nadd.ftz.f32 %f17, %f15, %f16;\nadd.s64 %rd22, %rd21, %rd7;\nadd.s64 %rd35, %rd22, %rd7;\nld.global.nc.f32 %f18, [%rd22];\nadd.ftz.f32 %f24, %f17, %f18;\nadd.s32 %r26, %r26, 4;\nadd.s32 %r25, %r25, -4;\nsetp.ne.s32 %p4, %r25, 0;\n@%p4 bra $L__BB0_5;\n\n$L__BB0_6:\nsetp.eq.s32 %p5, %r27, 0;\n@%p5 bra $L__BB0_9;\n\nmul.lo.s64 %rd23, %rd2, %rd3;\ncvt.s64.s32 %rd24, %r26;\nadd.s64 %rd25, %rd23, %rd24;\nmul.lo.s64 %rd26, %rd25, %rd4;\nadd.s64 %rd27, %rd26, %rd5;\nshl.b64 %rd28, %rd27, 2;\nadd.s64 %rd36, %rd1, %rd28;\nshl.b64 %rd11, %rd4, 2;\n\n$L__BB0_8:\n.pragma \"nounroll\";\nld.global.nc.f32 %f19, [%rd36];\nadd.ftz.f32 %f24, %f24, %f19;\nadd.s64 %rd36, %rd36, %rd11;\nadd.s32 %r27, %r27, -1;\nsetp.ne.s32 %p6, %r27, 0;\n@%p6 bra $L__BB0_8;\nbra.uni $L__BB0_9;\n\n$L__BB0_2:\nmov.f32 %f24, 0f00000000;\n\n$L__BB0_9:\nmul.lo.s64 %rd29, %rd2, %rd4;\ncvt.s64.s32 %rd30, %r2;\nadd.s64 %rd31, %rd29, %rd30;\ncvta.to.global.u64 %rd32, %rd14;\nshl.b64 %rd33, %rd31, 2;\nadd.s64 %rd34, %rd32, %rd33;\nst.global.f32 [%rd34], %f24;\n\n$L__BB0_10:\nret;\n\n}",
+          "kernel": "_Z19sum_dim1_opt_kernelPKfPfiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002"
+          ],
+          "grid_dim": [
+            2048,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

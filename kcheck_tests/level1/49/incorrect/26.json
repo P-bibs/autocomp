@@ -1,0 +1,59 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 4096,
+    "trace_const_002": 4095,
+    "trace_const_003": 1
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_Max_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_4555a99a_7_cuda_cu_0c0de2704cuda3std3__439_GLOBAL__N__4555a99a_7_cuda_cu_0c0de2706ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4555a99a_7_cuda_cu_0c0de2704cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4555a99a_7_cuda_cu_0c0de2704cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4555a99a_7_cuda_cu_0c0de2704cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4555a99a_7_cuda_cu_0c0de2704cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4555a99a_7_cuda_cu_0c0de2706thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n.extern .shared .align 16 .b8 sdata[];\n\n.visible .entry _Z18max_reducer_kernelPKfPfiiii(\n.param .u64 _Z18max_reducer_kernelPKfPfiiii_param_0,\n.param .u64 _Z18max_reducer_kernelPKfPfiiii_param_1,\n.param .u32 _Z18max_reducer_kernelPKfPfiiii_param_2,\n.param .u32 _Z18max_reducer_kernelPKfPfiiii_param_3,\n.param .u32 _Z18max_reducer_kernelPKfPfiiii_param_4,\n.param .u32 _Z18max_reducer_kernelPKfPfiiii_param_5\n)\n{\n.reg .pred %p<15>;\n.reg .f32 %f<22>;\n.reg .b32 %r<38>;\n.reg .b64 %rd<13>;\n\n\nld.param.u64 %rd3, [_Z18max_reducer_kernelPKfPfiiii_param_0];\nld.param.u64 %rd2, [_Z18max_reducer_kernelPKfPfiiii_param_1];\nld.param.u32 %r19, [_Z18max_reducer_kernelPKfPfiiii_param_3];\nld.param.u32 %r20, [_Z18max_reducer_kernelPKfPfiiii_param_4];\nld.param.u32 %r21, [_Z18max_reducer_kernelPKfPfiiii_param_5];\ncvta.to.global.u64 %rd1, %rd3;\nmov.u32 %r1, %ctaid.x;\ndiv.s32 %r2, %r1, %r20;\nmul.lo.s32 %r22, %r2, %r20;\nsub.s32 %r3, %r1, %r22;\nmov.u32 %r4, %tid.x;\nsetp.lt.s32 %p1, %r4, %r19;\n@%p1 bra $L__BB0_2;\nbra.uni $L__BB0_1;\n\n$L__BB0_2:\nmov.u32 %r5, %nctaid.y;\nmul.lo.s32 %r6, %r2, %r5;\nmov.u32 %r7, %ntid.x;\nsetp.eq.s32 %p2, %r21, 0;\n@%p2 bra $L__BB0_6;\n\nsetp.ne.s32 %p3, %r21, 1;\n@%p3 bra $L__BB0_8;\n\nmov.f32 %f21, 0fFF7FFFFF;\nmov.u32 %r34, %r4;\n\n$L__BB0_5:\nadd.s32 %r23, %r34, %r6;\nmad.lo.s32 %r24, %r23, %r20, %r3;\nmul.wide.s32 %rd4, %r24, 4;\nadd.s64 %rd5, %rd1, %rd4;\nld.global.nc.f32 %f11, [%rd5];\nsetp.gt.ftz.f32 %p4, %f11, %f21;\nselp.f32 %f21, %f11, %f21, %p4;\nadd.s32 %r34, %r34, %r7;\nsetp.lt.s32 %p5, %r34, %r19;\n@%p5 bra $L__BB0_5;\nbra.uni $L__BB0_10;\n\n$L__BB0_1:\nmov.f32 %f21, 0fFF7FFFFF;\nbra.uni $L__BB0_10;\n\n$L__BB0_6:\nmov.f32 %f21, 0fFF7FFFFF;\nmov.u32 %r35, %r4;\n\n$L__BB0_7:\nmad.lo.s32 %r25, %r35, %r5, %r2;\nmad.lo.s32 %r26, %r25, %r20, %r3;\nmul.wide.s32 %rd6, %r26, 4;\nadd.s64 %rd7, %rd1, %rd6;\nld.global.nc.f32 %f13, [%rd7];\nsetp.gt.ftz.f32 %p6, %f13, %f21;\nselp.f32 %f21, %f13, %f21, %p6;\nadd.s32 %r35, %r35, %r7;\nsetp.lt.s32 %p7, %r35, %r19;\n@%p7 bra $L__BB0_7;\nbra.uni $L__BB0_10;\n\n$L__BB0_8:\nadd.s32 %r27, %r6, %r3;\nmul.lo.s32 %r12, %r27, %r19;\nmov.f32 %f21, 0fFF7FFFFF;\nmov.u32 %r36, %r4;\n\n$L__BB0_9:\nadd.s32 %r28, %r36, %r12;\nmul.wide.s32 %rd8, %r28, 4;\nadd.s64 %rd9, %rd1, %rd8;\nld.global.nc.f32 %f15, [%rd9];\nsetp.gt.ftz.f32 %p8, %f15, %f21;\nselp.f32 %f21, %f15, %f21, %p8;\nadd.s32 %r36, %r36, %r7;\nsetp.lt.s32 %p9, %r36, %r19;\n@%p9 bra $L__BB0_9;\n\n$L__BB0_10:\nshl.b32 %r29, %r4, 2;\nmov.u32 %r30, sdata;\nadd.s32 %r15, %r30, %r29;\nst.shared.f32 [%r15], %f21;\nbar.sync 0;\nmov.u32 %r31, %ntid.x;\nshr.u32 %r37, %r31, 1;\nsetp.eq.s32 %p10, %r37, 0;\n@%p10 bra $L__BB0_15;\n\n$L__BB0_11:\nsetp.ge.u32 %p11, %r4, %r37;\n@%p11 bra $L__BB0_14;\n\nshl.b32 %r32, %r37, 2;\nadd.s32 %r33, %r15, %r32;\nld.shared.f32 %f16, [%r15];\nld.shared.f32 %f8, [%r33];\nsetp.leu.ftz.f32 %p12, %f8, %f16;\n@%p12 bra $L__BB0_14;\n\nst.shared.f32 [%r15], %f8;\n\n$L__BB0_14:\nbar.sync 0;\nshr.u32 %r37, %r37, 1;\nsetp.ne.s32 %p13, %r37, 0;\n@%p13 bra $L__BB0_11;\n\n$L__BB0_15:\nsetp.ne.s32 %p14, %r4, 0;\n@%p14 bra $L__BB0_17;\n\nld.shared.f32 %f17, [sdata];\ncvta.to.global.u64 %rd10, %rd2;\nmul.wide.s32 %rd11, %r1, 4;\nadd.s64 %rd12, %rd10, %rd11;\nst.global.f32 [%rd12], %f17;\n\n$L__BB0_17:\nret;\n\n}",
+          "kernel": "_Z18max_reducer_kernelPKfPfiiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_003"
+          ],
+          "grid_dim": [
+            524160,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

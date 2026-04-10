@@ -1,0 +1,57 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 4096,
+    "trace_const_002": 4095
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_Max_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_4ba78684_7_cuda_cu_ee18e8ba4cuda3std3__439_GLOBAL__N__4ba78684_7_cuda_cu_ee18e8ba6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4ba78684_7_cuda_cu_ee18e8ba4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4ba78684_7_cuda_cu_ee18e8ba4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4ba78684_7_cuda_cu_ee18e8ba4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4ba78684_7_cuda_cu_ee18e8ba4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_4ba78684_7_cuda_cu_ee18e8ba6thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z10max_kernelPKfPfiii(\n.param .u64 _Z10max_kernelPKfPfiii_param_0,\n.param .u64 _Z10max_kernelPKfPfiii_param_1,\n.param .u32 _Z10max_kernelPKfPfiii_param_2,\n.param .u32 _Z10max_kernelPKfPfiii_param_3,\n.param .u32 _Z10max_kernelPKfPfiii_param_4\n)\n{\n.reg .pred %p<12>;\n.reg .f32 %f<25>;\n.reg .b32 %r<31>;\n.reg .b64 %rd<28>;\n\n\nld.param.u64 %rd13, [_Z10max_kernelPKfPfiii_param_0];\nld.param.u64 %rd12, [_Z10max_kernelPKfPfiii_param_1];\nld.param.u32 %r13, [_Z10max_kernelPKfPfiii_param_2];\nld.param.u32 %r11, [_Z10max_kernelPKfPfiii_param_3];\nld.param.u32 %r12, [_Z10max_kernelPKfPfiii_param_4];\ncvta.to.global.u64 %rd1, %rd13;\nmov.u32 %r14, %ntid.x;\nmov.u32 %r15, %ctaid.x;\nmov.u32 %r16, %tid.x;\nmad.lo.s32 %r1, %r15, %r14, %r16;\nmul.lo.s32 %r17, %r12, %r13;\nsetp.ge.s32 %p1, %r1, %r17;\n@%p1 bra $L__BB0_9;\n\ndiv.s32 %r18, %r1, %r12;\nmul.lo.s32 %r19, %r12, %r11;\nmul.lo.s32 %r20, %r19, %r18;\ncvt.s64.s32 %rd2, %r20;\nmul.lo.s32 %r21, %r18, %r12;\nsub.s32 %r22, %r1, %r21;\ncvt.s64.s32 %rd3, %r22;\nsetp.lt.s32 %p2, %r11, 1;\nmov.f32 %f24, 0fFE967699;\n@%p2 bra $L__BB0_8;\n\nadd.s32 %r24, %r11, -1;\nand.b32 %r30, %r11, 3;\nsetp.lt.u32 %p3, %r24, 3;\nmov.f32 %f24, 0fFE967699;\nmov.u32 %r29, 0;\n@%p3 bra $L__BB0_5;\n\nsub.s32 %r28, %r11, %r30;\nadd.s64 %rd14, %rd3, %rd2;\nshl.b64 %rd15, %rd14, 2;\nadd.s64 %rd26, %rd1, %rd15;\nmul.wide.s32 %rd5, %r12, 4;\nmov.f32 %f24, 0fFE967699;\nmov.u32 %r29, 0;\n\n$L__BB0_4:\nld.global.nc.f32 %f12, [%rd26];\nsetp.gt.ftz.f32 %p4, %f12, %f24;\nselp.f32 %f13, %f12, %f24, %p4;\nadd.s64 %rd16, %rd26, %rd5;\nld.global.nc.f32 %f14, [%rd16];\nsetp.gt.ftz.f32 %p5, %f14, %f13;\nselp.f32 %f15, %f14, %f13, %p5;\nadd.s64 %rd17, %rd16, %rd5;\nld.global.nc.f32 %f16, [%rd17];\nsetp.gt.ftz.f32 %p6, %f16, %f15;\nselp.f32 %f17, %f16, %f15, %p6;\nadd.s64 %rd18, %rd17, %rd5;\nadd.s64 %rd26, %rd18, %rd5;\nld.global.nc.f32 %f18, [%rd18];\nsetp.gt.ftz.f32 %p7, %f18, %f17;\nselp.f32 %f24, %f18, %f17, %p7;\nadd.s32 %r29, %r29, 4;\nadd.s32 %r28, %r28, -4;\nsetp.ne.s32 %p8, %r28, 0;\n@%p8 bra $L__BB0_4;\n\n$L__BB0_5:\nsetp.eq.s32 %p9, %r30, 0;\n@%p9 bra $L__BB0_8;\n\nadd.s64 %rd19, %rd3, %rd2;\nmul.lo.s32 %r26, %r29, %r12;\ncvt.s64.s32 %rd20, %r26;\nadd.s64 %rd21, %rd19, %rd20;\nshl.b64 %rd22, %rd21, 2;\nadd.s64 %rd27, %rd1, %rd22;\nmul.wide.s32 %rd9, %r12, 4;\n\n$L__BB0_7:\n.pragma \"nounroll\";\nld.global.nc.f32 %f19, [%rd27];\nsetp.gt.ftz.f32 %p10, %f19, %f24;\nselp.f32 %f24, %f19, %f24, %p10;\nadd.s64 %rd27, %rd27, %rd9;\nadd.s32 %r30, %r30, -1;\nsetp.ne.s32 %p11, %r30, 0;\n@%p11 bra $L__BB0_7;\n\n$L__BB0_8:\ncvta.to.global.u64 %rd23, %rd12;\nmul.wide.s32 %rd24, %r1, 4;\nadd.s64 %rd25, %rd23, %rd24;\nst.global.f32 [%rd25], %f24;\n\n$L__BB0_9:\nret;\n\n}",
+          "kernel": "_Z10max_kernelPKfPfiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002"
+          ],
+          "grid_dim": [
+            2048,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

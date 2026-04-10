@@ -1,0 +1,82 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 134217728
+    },
+    "conv_transpose_weight": {
+      "size": 65536
+    },
+    "conv_transpose_bias": {
+      "size": 64
+    },
+    "bias": {
+      "size": 64
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 538970112
+    }
+  },
+  "constants": {
+    "trace_const_000": 32,
+    "trace_const_001": 64,
+    "trace_const_002": 256,
+    "trace_const_003": 513,
+    "trace_const_004": 4,
+    "trace_const_005": 2,
+    "trace_const_006": 1
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "5_ConvTranspose2d_Subtract_Tanh.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_097020cc_7_cuda_cu_66d66f4b4cuda3std3__439_GLOBAL__N__097020cc_7_cuda_cu_66d66f4b6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_097020cc_7_cuda_cu_66d66f4b4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_097020cc_7_cuda_cu_66d66f4b4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_097020cc_7_cuda_cu_66d66f4b4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_097020cc_7_cuda_cu_66d66f4b4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_097020cc_7_cuda_cu_66d66f4b6thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii(\n.param .u64 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_0,\n.param .u64 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_1,\n.param .u64 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_2,\n.param .u64 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_3,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_4,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_5,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_6,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_7,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_8,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_9,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_10,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_11,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_12,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_13,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_14,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_15,\n.param .u32 _Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_16\n)\n{\n.reg .pred %p<21>;\n.reg .f32 %f<64>;\n.reg .b32 %r<91>;\n.reg .b64 %rd<17>;\n//\n.shared .align 4 .b8 _ZZ37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_PfiiiiiiiiiiiiiE7sweight[1024];\n//\n.shared .align 4 .b8 _ZZ37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_PfiiiiiiiiiiiiiE6sinput[1024];\n\nld.param.u64 %rd3, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_0];\nld.param.u64 %rd4, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_1];\nld.param.u64 %rd5, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_2];\nld.param.u64 %rd6, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_3];\nld.param.u32 %r38, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_4];\nld.param.u32 %r30, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_5];\nld.param.u32 %r31, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_6];\nld.param.u32 %r32, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_7];\nld.param.u32 %r33, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_8];\nld.param.u32 %r34, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_9];\nld.param.u32 %r35, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_10];\nld.param.u32 %r36, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_11];\nld.param.u32 %r37, [_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii_param_12];\nmov.u32 %r39, %ctaid.y;\nshl.b32 %r40, %r39, 4;\nmov.u32 %r1, %tid.y;\nadd.s32 %r2, %r40, %r1;\nmov.u32 %r3, %tid.x;\nmov.u32 %r4, %ctaid.z;\nsetp.ge.s32 %p1, %r4, %r38;\nsetp.ge.s32 %p2, %r2, %r31;\nor.pred %p3, %p1, %p2;\n@%p3 bra $L__BB0_22;\n\nsetp.gt.s32 %p4, %r30, 0;\n@%p4 bra $L__BB0_3;\nbra.uni $L__BB0_2;\n\n$L__BB0_3:\nmul.lo.s32 %r5, %r2, %r30;\nshl.b32 %r42, %r1, 6;\nmov.u32 %r43, _ZZ37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_PfiiiiiiiiiiiiiE7sweight;\nadd.s32 %r44, %r43, %r42;\nshl.b32 %r45, %r3, 2;\nadd.s32 %r6, %r44, %r45;\nmov.u32 %r7, %ctaid.x;\nshl.b32 %r46, %r7, 4;\nadd.s32 %r8, %r46, %r3;\nmul.lo.s32 %r9, %r4, %r30;\nmov.u32 %r47, _ZZ37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_PfiiiiiiiiiiiiiE6sinput;\nadd.s32 %r48, %r47, %r42;\nadd.s32 %r10, %r48, %r45;\nadd.s32 %r49, %r47, %r45;\nadd.s32 %r11, %r49, 128;\ncvta.to.global.u64 %rd1, %rd3;\ncvta.to.global.u64 %rd2, %rd4;\nadd.s32 %r50, %r30, 15;\nshr.s32 %r51, %r50, 31;\nshr.u32 %r52, %r51, 28;\nadd.s32 %r53, %r50, %r52;\nshr.s32 %r12, %r53, 4;\nmov.f32 %f22, 0f00000000;\nmov.u32 %r86, 0;\nmov.f32 %f61, %f22;\n\n$L__BB0_4:\nshl.b32 %r14, %r86, 4;\nsub.s32 %r54, %r14, %r30;\nmax.u32 %r15, %r54, -16;\nadd.s32 %r16, %r14, %r1;\nsetp.ge.s32 %p5, %r16, %r30;\nsetp.gt.u32 %p6, %r1, 15;\nor.pred %p7, %p6, %p5;\nmov.f32 %f56, %f22;\n@%p7 bra $L__BB0_6;\n\nadd.s32 %r55, %r16, %r5;\ndiv.u32 %r56, %r3, %r36;\nmul.lo.s32 %r57, %r56, %r36;\nsub.s32 %r58, %r3, %r57;\nmad.lo.s32 %r59, %r55, %r36, %r58;\nmad.lo.s32 %r60, %r59, %r37, %r56;\nmul.wide.s32 %rd7, %r60, 4;\nadd.s64 %rd8, %rd2, %rd7;\nld.global.nc.f32 %f56, [%rd8];\n\n$L__BB0_6:\nst.shared.f32 [%r6], %f56;\nsetp.ge.s32 %p8, %r8, %r33;\nmov.f32 %f57, 0f00000000;\nor.pred %p10, %p8, %p5;\n@%p10 bra $L__BB0_8;\n\nadd.s32 %r61, %r16, %r9;\ndiv.u32 %r62, %r7, %r35;\nmad.lo.s32 %r63, %r61, %r32, %r62;\nmad.lo.s32 %r64, %r63, %r33, %r8;\nmul.wide.u32 %rd9, %r64, 4;\nadd.s64 %rd10, %rd1, %rd9;\nld.global.nc.f32 %f57, [%rd10];\n\n$L__BB0_8:\nst.shared.f32 [%r10], %f57;\nbar.sync 0;\nsetp.ge.s32 %p11, %r14, %r30;\n@%p11 bra $L__BB0_16;\n\nld.shared.f32 %f6, [%r6];\nmov.u32 %r90, 0;\nneg.s32 %r66, %r15;\nand.b32 %r17, %r66, 3;\nsetp.gt.u32 %p12, %r15, -4;\n@%p12 bra $L__BB0_12;\n\nadd.s32 %r68, %r15, %r17;\nneg.s32 %r87, %r68;\nmov.u32 %r90, 0;\nmov.u32 %r88, %r11;\n\n$L__BB0_11:\nld.shared.f32 %f26, [%r88+-128];\nfma.rn.ftz.f32 %f27, %f26, %f6, %f61;\nld.shared.f32 %f28, [%r88+-64];\nfma.rn.ftz.f32 %f29, %f28, %f6, %f27;\nld.shared.f32 %f30, [%r88];\nfma.rn.ftz.f32 %f31, %f30, %f6, %f29;\nld.shared.f32 %f32, [%r88+64];\nfma.rn.ftz.f32 %f61, %f32, %f6, %f31;\nadd.s32 %r90, %r90, 4;\nadd.s32 %r88, %r88, 256;\nadd.s32 %r87, %r87, -4;\nsetp.ne.s32 %p13, %r87, 0;\n@%p13 bra $L__BB0_11;\n\n$L__BB0_12:\nsetp.eq.s32 %p14, %r17, 0;\n@%p14 bra $L__BB0_16;\n\nshl.b32 %r69, %r90, 6;\nadd.s32 %r71, %r47, %r69;\nadd.s32 %r27, %r71, %r45;\nld.shared.f32 %f33, [%r27];\nfma.rn.ftz.f32 %f61, %f33, %f6, %f61;\nsetp.eq.s32 %p15, %r17, 1;\n@%p15 bra $L__BB0_16;\n\nld.shared.f32 %f34, [%r27+64];\nfma.rn.ftz.f32 %f61, %f34, %f6, %f61;\nsetp.eq.s32 %p16, %r17, 2;\n@%p16 bra $L__BB0_16;\n\nld.shared.f32 %f35, [%r27+128];\nfma.rn.ftz.f32 %f61, %f35, %f6, %f61;\n\n$L__BB0_16:\nbar.sync 0;\nadd.s32 %r86, %r86, 1;\nsetp.lt.s32 %p17, %r86, %r12;\n@%p17 bra $L__BB0_4;\nbra.uni $L__BB0_17;\n\n$L__BB0_2:\nmov.f32 %f61, 0f00000000;\n\n$L__BB0_17:\nmov.u32 %r73, %ctaid.x;\nshl.b32 %r74, %r73, 4;\nadd.s32 %r29, %r74, %r3;\ncvta.to.global.u64 %rd11, %rd5;\nmul.wide.s32 %rd12, %r2, 4;\nadd.s64 %rd13, %rd11, %rd12;\nld.global.nc.f32 %f36, [%rd13];\nsub.ftz.f32 %f16, %f61, %f36;\nsetp.ge.s32 %p18, %r29, %r35;\n@%p18 bra $L__BB0_22;\n\nabs.ftz.f32 %f17, %f16;\nsetp.ltu.ftz.f32 %p19, %f17, 0f3F19999A;\n@%p19 bra $L__BB0_20;\nbra.uni $L__BB0_19;\n\n$L__BB0_20:\nmul.ftz.f32 %f45, %f16, %f16;\nmov.f32 %f46, 0fBD563CAE;\nmov.f32 %f47, 0f3C80F082;\nfma.rn.ftz.f32 %f48, %f47, %f45, %f46;\nmov.f32 %f49, 0f3E085941;\nfma.rn.ftz.f32 %f50, %f48, %f45, %f49;\nmov.f32 %f51, 0fBEAAA9ED;\nfma.rn.ftz.f32 %f52, %f50, %f45, %f51;\nmov.f32 %f53, 0f00000000;\nfma.rn.ftz.f32 %f54, %f52, %f45, %f53;\nfma.rn.ftz.f32 %f63, %f54, %f16, %f16;\nbra.uni $L__BB0_21;\n\n$L__BB0_19:\nmul.ftz.f32 %f37, %f17, 0f4038AA3B;\nex2.approx.ftz.f32 %f38, %f37;\nadd.ftz.f32 %f39, %f38, 0f3F800000;\nmov.f32 %f40, 0f3F800000;\nrcp.approx.ftz.f32 %f41, %f39;\nmov.f32 %f42, 0fC0000000;\nfma.rn.ftz.f32 %f43, %f41, %f42, %f40;\nsetp.ge.ftz.f32 %p20, %f17, 0f41102CB4;\nselp.f32 %f44, 0f3F800000, %f43, %p20;\nmov.b32 %r75, %f44;\nmov.b32 %r76, %f16;\nand.b32 %r77, %r76, -2147483648;\nor.b32 %r78, %r77, %r75;\nmov.b32 %f63, %r78;\n\n$L__BB0_21:\nmad.lo.s32 %r80, %r4, %r31, %r2;\nmul.lo.s32 %r81, %r80, %r34;\nadd.s32 %r82, %r29, %r73;\nmad.lo.s32 %r83, %r81, %r35, %r82;\nrem.u32 %r84, %r73, %r35;\nsub.s32 %r85, %r83, %r84;\ncvta.to.global.u64 %rd14, %rd6;\nmul.wide.u32 %rd15, %r85, 4;\nadd.s64 %rd16, %rd14, %rd15;\nst.global.f32 [%rd16], %f63;\n\n$L__BB0_22:\nret;\n\n}",
+          "kernel": "_Z37fused_conv_transpose_bias_tanh_kernelPKfS0_S0_Pfiiiiiiiiiiiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "conv_transpose_weight",
+            "bias",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_001",
+            "trace_const_002",
+            "trace_const_002",
+            "trace_const_003",
+            "trace_const_003",
+            "trace_const_004",
+            "trace_const_004",
+            "trace_const_005",
+            "trace_const_005",
+            "trace_const_006",
+            "trace_const_006"
+          ],
+          "grid_dim": [
+            33,
+            4,
+            32
+          ],
+          "block_dim": [
+            16,
+            16,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

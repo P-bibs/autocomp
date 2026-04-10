@@ -1,0 +1,57 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 128,
+    "trace_const_001": 4096,
+    "trace_const_002": 4095
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_Max_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n.global .align 1 .b8 _ZN37_INTERNAL_7c553a12_7_cuda_cu_7ac04dfb4cuda3std3__439_GLOBAL__N__7c553a12_7_cuda_cu_7ac04dfb6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_7c553a12_7_cuda_cu_7ac04dfb4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_7c553a12_7_cuda_cu_7ac04dfb4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_7c553a12_7_cuda_cu_7ac04dfb4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_7c553a12_7_cuda_cu_7ac04dfb4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_7c553a12_7_cuda_cu_7ac04dfb6thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n.extern .shared .align 16 .b8 sdata[];\n\n.visible .entry _Z15max_dim2_kernelPKfPfiii(\n.param .u64 _Z15max_dim2_kernelPKfPfiii_param_0,\n.param .u64 _Z15max_dim2_kernelPKfPfiii_param_1,\n.param .u32 _Z15max_dim2_kernelPKfPfiii_param_2,\n.param .u32 _Z15max_dim2_kernelPKfPfiii_param_3,\n.param .u32 _Z15max_dim2_kernelPKfPfiii_param_4\n)\n{\n.reg .pred %p<9>;\n.reg .f32 %f<12>;\n.reg .b32 %r<19>;\n.reg .b64 %rd<12>;\n\n\nld.param.u64 %rd3, [_Z15max_dim2_kernelPKfPfiii_param_0];\nld.param.u64 %rd4, [_Z15max_dim2_kernelPKfPfiii_param_1];\nld.param.u32 %r10, [_Z15max_dim2_kernelPKfPfiii_param_4];\nmov.u32 %r1, %ctaid.x;\nmov.u32 %r2, %tid.x;\nsetp.lt.s32 %p1, %r2, %r10;\n@%p1 bra $L__BB0_2;\nbra.uni $L__BB0_1;\n\n$L__BB0_2:\nmov.u32 %r3, %ntid.x;\nmul.lo.s32 %r11, %r1, %r10;\ncvt.s64.s32 %rd1, %r11;\ncvta.to.global.u64 %rd2, %rd3;\nmov.f32 %f11, 0fFF7FFFFF;\nmov.u32 %r17, %r2;\n\n$L__BB0_3:\ncvt.s64.s32 %rd5, %r17;\nadd.s64 %rd6, %rd5, %rd1;\nshl.b64 %rd7, %rd6, 2;\nadd.s64 %rd8, %rd2, %rd7;\nld.global.nc.f32 %f7, [%rd8];\nsetp.gt.ftz.f32 %p2, %f7, %f11;\nselp.f32 %f11, %f7, %f11, %p2;\nadd.s32 %r17, %r17, %r3;\nsetp.lt.s32 %p3, %r17, %r10;\n@%p3 bra $L__BB0_3;\nbra.uni $L__BB0_4;\n\n$L__BB0_1:\nmov.f32 %f11, 0fFF7FFFFF;\n\n$L__BB0_4:\nshl.b32 %r12, %r2, 2;\nmov.u32 %r13, sdata;\nadd.s32 %r6, %r13, %r12;\nst.shared.f32 [%r6], %f11;\nbar.sync 0;\nmov.u32 %r14, %ntid.x;\nshr.u32 %r18, %r14, 1;\nsetp.eq.s32 %p4, %r18, 0;\n@%p4 bra $L__BB0_9;\n\n$L__BB0_5:\nsetp.ge.u32 %p5, %r2, %r18;\n@%p5 bra $L__BB0_8;\n\nshl.b32 %r15, %r18, 2;\nadd.s32 %r16, %r6, %r15;\nld.shared.f32 %f8, [%r6];\nld.shared.f32 %f4, [%r16];\nsetp.leu.ftz.f32 %p6, %f4, %f8;\n@%p6 bra $L__BB0_8;\n\nst.shared.f32 [%r6], %f4;\n\n$L__BB0_8:\nbar.sync 0;\nshr.u32 %r18, %r18, 1;\nsetp.ne.s32 %p7, %r18, 0;\n@%p7 bra $L__BB0_5;\n\n$L__BB0_9:\nsetp.ne.s32 %p8, %r2, 0;\n@%p8 bra $L__BB0_11;\n\nld.shared.f32 %f9, [sdata];\ncvta.to.global.u64 %rd9, %rd4;\nmul.wide.s32 %rd10, %r1, 4;\nadd.s64 %rd11, %rd9, %rd10;\nst.global.f32 [%rd11], %f9;\n\n$L__BB0_11:\nret;\n\n}\n//\n.visible .entry _Z15max_dim1_kernelPKfPfiii(\n.param .u64 _Z15max_dim1_kernelPKfPfiii_param_0,\n.param .u64 _Z15max_dim1_kernelPKfPfiii_param_1,\n.param .u32 _Z15max_dim1_kernelPKfPfiii_param_2,\n.param .u32 _Z15max_dim1_kernelPKfPfiii_param_3,\n.param .u32 _Z15max_dim1_kernelPKfPfiii_param_4\n)\n{\n.reg .pred %p<9>;\n.reg .f32 %f<12>;\n.reg .b32 %r<25>;\n.reg .b64 %rd<9>;\n\n\nld.param.u64 %rd2, [_Z15max_dim1_kernelPKfPfiii_param_0];\nld.param.u64 %rd3, [_Z15max_dim1_kernelPKfPfiii_param_1];\nld.param.u32 %r12, [_Z15max_dim1_kernelPKfPfiii_param_3];\nld.param.u32 %r13, [_Z15max_dim1_kernelPKfPfiii_param_4];\nmov.u32 %r1, %ctaid.x;\nmov.u32 %r2, %tid.x;\nsetp.lt.s32 %p1, %r2, %r12;\n@%p1 bra $L__BB1_2;\nbra.uni $L__BB1_1;\n\n$L__BB1_2:\ndiv.s32 %r14, %r1, %r13;\nmul.lo.s32 %r3, %r14, %r12;\nmov.u32 %r4, %ntid.x;\nmul.lo.s32 %r15, %r14, %r13;\nsub.s32 %r5, %r1, %r15;\ncvta.to.global.u64 %rd1, %rd2;\nmov.f32 %f11, 0fFF7FFFFF;\nmov.u32 %r23, %r2;\n\n$L__BB1_3:\nadd.s32 %r16, %r23, %r3;\nmad.lo.s32 %r17, %r16, %r13, %r5;\nmul.wide.s32 %rd4, %r17, 4;\nadd.s64 %rd5, %rd1, %rd4;\nld.global.nc.f32 %f7, [%rd5];\nsetp.gt.ftz.f32 %p2, %f7, %f11;\nselp.f32 %f11, %f7, %f11, %p2;\nadd.s32 %r23, %r23, %r4;\nsetp.lt.s32 %p3, %r23, %r12;\n@%p3 bra $L__BB1_3;\nbra.uni $L__BB1_4;\n\n$L__BB1_1:\nmov.f32 %f11, 0fFF7FFFFF;\n\n$L__BB1_4:\nshl.b32 %r18, %r2, 2;\nmov.u32 %r19, sdata;\nadd.s32 %r8, %r19, %r18;\nst.shared.f32 [%r8], %f11;\nbar.sync 0;\nmov.u32 %r20, %ntid.x;\nshr.u32 %r24, %r20, 1;\nsetp.eq.s32 %p4, %r24, 0;\n@%p4 bra $L__BB1_9;\n\n$L__BB1_5:\nsetp.ge.u32 %p5, %r2, %r24;\n@%p5 bra $L__BB1_8;\n\nshl.b32 %r21, %r24, 2;\nadd.s32 %r22, %r8, %r21;\nld.shared.f32 %f8, [%r8];\nld.shared.f32 %f4, [%r22];\nsetp.leu.ftz.f32 %p6, %f4, %f8;\n@%p6 bra $L__BB1_8;\n\nst.shared.f32 [%r8], %f4;\n\n$L__BB1_8:\nbar.sync 0;\nshr.u32 %r24, %r24, 1;\nsetp.ne.s32 %p7, %r24, 0;\n@%p7 bra $L__BB1_5;\n\n$L__BB1_9:\nsetp.ne.s32 %p8, %r2, 0;\n@%p8 bra $L__BB1_11;\n\nld.shared.f32 %f9, [sdata];\ncvta.to.global.u64 %rd6, %rd3;\nmul.wide.s32 %rd7, %r1, 4;\nadd.s64 %rd8, %rd6, %rd7;\nst.global.f32 [%rd8], %f9;\n\n$L__BB1_11:\nret;\n\n}\n//\n.visible .entry _Z15max_dim0_kernelPKfPfiii(\n.param .u64 _Z15max_dim0_kernelPKfPfiii_param_0,\n.param .u64 _Z15max_dim0_kernelPKfPfiii_param_1,\n.param .u32 _Z15max_dim0_kernelPKfPfiii_param_2,\n.param .u32 _Z15max_dim0_kernelPKfPfiii_param_3,\n.param .u32 _Z15max_dim0_kernelPKfPfiii_param_4\n)\n{\n.reg .pred %p<9>;\n.reg .f32 %f<12>;\n.reg .b32 %r<25>;\n.reg .b64 %rd<9>;\n\n\nld.param.u64 %rd2, [_Z15max_dim0_kernelPKfPfiii_param_0];\nld.param.u64 %rd3, [_Z15max_dim0_kernelPKfPfiii_param_1];\nld.param.u32 %r12, [_Z15max_dim0_kernelPKfPfiii_param_2];\nld.param.u32 %r13, [_Z15max_dim0_kernelPKfPfiii_param_3];\nld.param.u32 %r14, [_Z15max_dim0_kernelPKfPfiii_param_4];\nmov.u32 %r1, %ctaid.x;\nmov.u32 %r2, %tid.x;\nsetp.lt.s32 %p1, %r2, %r12;\n@%p1 bra $L__BB2_2;\nbra.uni $L__BB2_1;\n\n$L__BB2_2:\nmov.u32 %r3, %ntid.x;\ndiv.s32 %r5, %r1, %r14;\nmul.lo.s32 %r15, %r5, %r14;\nsub.s32 %r4, %r1, %r15;\ncvta.to.global.u64 %rd1, %rd2;\nmov.f32 %f11, 0fFF7FFFFF;\nmov.u32 %r23, %r2;\n\n$L__BB2_3:\nmad.lo.s32 %r16, %r23, %r13, %r5;\nmad.lo.s32 %r17, %r16, %r14, %r4;\nmul.wide.s32 %rd4, %r17, 4;\nadd.s64 %rd5, %rd1, %rd4;\nld.global.nc.f32 %f7, [%rd5];\nsetp.gt.ftz.f32 %p2, %f7, %f11;\nselp.f32 %f11, %f7, %f11, %p2;\nadd.s32 %r23, %r23, %r3;\nsetp.lt.s32 %p3, %r23, %r12;\n@%p3 bra $L__BB2_3;\nbra.uni $L__BB2_4;\n\n$L__BB2_1:\nmov.f32 %f11, 0fFF7FFFFF;\n\n$L__BB2_4:\nshl.b32 %r18, %r2, 2;\nmov.u32 %r19, sdata;\nadd.s32 %r8, %r19, %r18;\nst.shared.f32 [%r8], %f11;\nbar.sync 0;\nmov.u32 %r20, %ntid.x;\nshr.u32 %r24, %r20, 1;\nsetp.eq.s32 %p4, %r24, 0;\n@%p4 bra $L__BB2_9;\n\n$L__BB2_5:\nsetp.ge.u32 %p5, %r2, %r24;\n@%p5 bra $L__BB2_8;\n\nshl.b32 %r21, %r24, 2;\nadd.s32 %r22, %r8, %r21;\nld.shared.f32 %f8, [%r8];\nld.shared.f32 %f4, [%r22];\nsetp.leu.ftz.f32 %p6, %f4, %f8;\n@%p6 bra $L__BB2_8;\n\nst.shared.f32 [%r8], %f4;\n\n$L__BB2_8:\nbar.sync 0;\nshr.u32 %r24, %r24, 1;\nsetp.ne.s32 %p7, %r24, 0;\n@%p7 bra $L__BB2_5;\n\n$L__BB2_9:\nsetp.ne.s32 %p8, %r2, 0;\n@%p8 bra $L__BB2_11;\n\nld.shared.f32 %f9, [sdata];\ncvta.to.global.u64 %rd6, %rd3;\nmul.wide.s32 %rd7, %r1, 4;\nadd.s64 %rd8, %rd6, %rd7;\nst.global.f32 [%rd8], %f9;\n\n$L__BB2_11:\nret;\n\n}",
+          "kernel": "_Z15max_dim1_kernelPKfPfiii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001",
+            "trace_const_002"
+          ],
+          "grid_dim": [
+            524160,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}

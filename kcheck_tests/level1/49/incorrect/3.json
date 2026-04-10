@@ -1,0 +1,55 @@
+{
+  "source_tensors": {
+    "x": {
+      "size": 2146959360
+    }
+  },
+  "dest_tensors": {
+    "out": {
+      "size": 524160
+    }
+  },
+  "constants": {
+    "trace_const_000": 4096,
+    "trace_const_001": 524160
+  },
+  "pipelines": [
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "spec",
+          "file": "49_Max_reduction_over_a_dimension.cpp"
+        }
+      ]
+    },
+    {
+      "scratch_tensors": {},
+      "kernels": [
+        {
+          "source": "ptx",
+          "ptx": ".version 8.5\n.target sm_80\n.address_size 64\n\n//\n//\n.global .align 1 .b8 _ZN37_INTERNAL_6eaa117f_7_cuda_cu_edbcb9fc4cuda3std3__439_GLOBAL__N__6eaa117f_7_cuda_cu_edbcb9fc6ignoreE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6eaa117f_7_cuda_cu_edbcb9fc4cuda3std3__48in_placeE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6eaa117f_7_cuda_cu_edbcb9fc4cuda3std6ranges3__45__cpo4swapE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6eaa117f_7_cuda_cu_edbcb9fc4cuda3std6ranges3__45__cpo9iter_moveE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6eaa117f_7_cuda_cu_edbcb9fc4cuda3std6ranges3__45__cpo7advanceE[1];\n.global .align 1 .b8 _ZN37_INTERNAL_6eaa117f_7_cuda_cu_edbcb9fc6thrust20THRUST_200400_800_NS6system6detail10sequential3seqE[1];\n\n.visible .entry _Z17max_reduce_kernelPKfPfii(\n.param .u64 _Z17max_reduce_kernelPKfPfii_param_0,\n.param .u64 _Z17max_reduce_kernelPKfPfii_param_1,\n.param .u32 _Z17max_reduce_kernelPKfPfii_param_2,\n.param .u32 _Z17max_reduce_kernelPKfPfii_param_3\n)\n{\n.reg .pred %p<17>;\n.reg .f32 %f<27>;\n.reg .b32 %r<37>;\n.reg .b64 %rd<12>;\n//\n.shared .align 4 .b8 _ZZ17max_reduce_kernelPKfPfiiE5sdata[1024];\n\nld.param.u64 %rd3, [_Z17max_reduce_kernelPKfPfii_param_0];\nld.param.u64 %rd4, [_Z17max_reduce_kernelPKfPfii_param_1];\nld.param.u32 %r14, [_Z17max_reduce_kernelPKfPfii_param_2];\nld.param.u32 %r15, [_Z17max_reduce_kernelPKfPfii_param_3];\nmov.u32 %r1, %tid.x;\nmov.u32 %r2, %ctaid.x;\nsetp.ge.s32 %p1, %r2, %r15;\n@%p1 bra $L__BB0_17;\n\nsetp.ge.s32 %p2, %r1, %r14;\nmov.f32 %f22, 0fFF7FFFFF;\n@%p2 bra $L__BB0_4;\n\nmov.u32 %r3, %ntid.x;\ncvta.to.global.u64 %rd1, %rd3;\nmul.lo.s32 %r16, %r2, %r14;\ncvt.s64.s32 %rd2, %r16;\nmov.f32 %f22, 0fFF7FFFFF;\nmov.u32 %r34, %r1;\n\n$L__BB0_3:\ncvt.s64.s32 %rd5, %r34;\nadd.s64 %rd6, %rd5, %rd2;\nshl.b64 %rd7, %rd6, 2;\nadd.s64 %rd8, %rd1, %rd7;\nld.global.nc.f32 %f15, [%rd8];\nsetp.gt.ftz.f32 %p3, %f15, %f22;\nselp.f32 %f22, %f15, %f22, %p3;\nadd.s32 %r34, %r34, %r3;\nsetp.lt.s32 %p4, %r34, %r14;\n@%p4 bra $L__BB0_3;\n\n$L__BB0_4:\nmov.u32 %r6, WARP_SZ;\nsetp.lt.s32 %p5, %r6, 2;\n@%p5 bra $L__BB0_7;\n\nshr.u32 %r35, %r6, 1;\n\n$L__BB0_6:\nmov.b32 %r17, %f22;\nmov.u32 %r18, 31;\nmov.u32 %r19, -1;\nshfl.sync.down.b32 %r20|%p6, %r17, %r35, %r18, %r19;\nmov.b32 %f16, %r20;\nsetp.lt.ftz.f32 %p7, %f22, %f16;\nselp.f32 %f22, %f16, %f22, %p7;\nshr.u32 %r35, %r35, 1;\nsetp.ne.s32 %p8, %r35, 0;\n@%p8 bra $L__BB0_6;\n\n$L__BB0_7:\nrem.s32 %r21, %r1, %r6;\nsetp.ne.s32 %p9, %r21, 0;\n@%p9 bra $L__BB0_9;\n\ndiv.s32 %r22, %r1, %r6;\nshl.b32 %r23, %r22, 2;\nmov.u32 %r24, _ZZ17max_reduce_kernelPKfPfiiE5sdata;\nadd.s32 %r25, %r24, %r23;\nst.shared.f32 [%r25], %f22;\n\n$L__BB0_9:\nbar.sync 0;\nmov.u32 %r26, %ntid.x;\ndiv.u32 %r10, %r26, %r6;\nsetp.ge.u32 %p10, %r1, %r10;\nmov.f32 %f25, 0fFF7FFFFF;\n@%p10 bra $L__BB0_11;\n\nshl.b32 %r27, %r1, 2;\nmov.u32 %r28, _ZZ17max_reduce_kernelPKfPfiiE5sdata;\nadd.s32 %r29, %r28, %r27;\nld.shared.f32 %f25, [%r29];\n\n$L__BB0_11:\nshr.u32 %r36, %r10, 1;\nsetp.eq.s32 %p11, %r36, 0;\n@%p11 bra $L__BB0_15;\n\n$L__BB0_12:\nsetp.ge.s32 %p12, %r1, %r36;\n@%p12 bra $L__BB0_14;\n\nmov.b32 %r30, %f25;\nmov.u32 %r31, 31;\nmov.u32 %r32, -1;\nshfl.sync.down.b32 %r33|%p13, %r30, %r36, %r31, %r32;\nmov.b32 %f18, %r33;\nsetp.lt.ftz.f32 %p14, %f25, %f18;\nselp.f32 %f25, %f18, %f25, %p14;\n\n$L__BB0_14:\nshr.u32 %r36, %r36, 1;\nsetp.ne.s32 %p15, %r36, 0;\n@%p15 bra $L__BB0_12;\n\n$L__BB0_15:\nsetp.ne.s32 %p16, %r1, 0;\n@%p16 bra $L__BB0_17;\n\ncvta.to.global.u64 %rd9, %rd4;\nmul.wide.s32 %rd10, %r2, 4;\nadd.s64 %rd11, %rd9, %rd10;\nst.global.f32 [%rd11], %f25;\n\n$L__BB0_17:\nret;\n\n}",
+          "kernel": "_Z17max_reduce_kernelPKfPfii",
+          "defines": {},
+          "arguments": [
+            "x",
+            "out",
+            "trace_const_000",
+            "trace_const_001"
+          ],
+          "grid_dim": [
+            524160,
+            1,
+            1
+          ],
+          "block_dim": [
+            256,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "expected_result": "equivalent"
+}
