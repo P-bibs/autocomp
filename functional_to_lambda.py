@@ -440,6 +440,7 @@ class LambdaLowerer:
             if not name.startswith("__")
         }
         self.static_env.update(spec.state_meta)
+        self.name_use_counts = self.compute_name_use_counts(spec.functional_model)
         self._init_env()
 
     def _init_env(self) -> None:
@@ -470,6 +471,13 @@ class LambdaLowerer:
                     self.env[name] = ValueRef(
                         shape=shape,
                         renderer=lambda coord, cache_fn=cache_fn: f"{cache_fn}({', '.join(coord)})",
+                    )
+                elif self.backend == "cpp" and (prefix_fn := self.cpp_cached_prefix_select_fn(name, shape)) is not None:
+                    self.env[name] = ValueRef(
+                        shape=shape,
+                        renderer=lambda coord, prefix_fn=prefix_fn: (
+                            f"_smt_select_from({prefix_fn}({coord[0]}){''.join(f', {item}' for item in coord[1:])})"
+                        ),
                     )
                 else:
                     self.env[name] = tensor_arg_value(name, shape, self.backend)
@@ -534,13 +542,48 @@ class LambdaLowerer:
             return None
         return f"_smt_cached_select_{name}"
 
+    def cpp_cached_prefix_select_fn(self, name: str, shape: Sequence[int]) -> str | None:
+        if self.backend != "cpp" or len(shape) < 2:
+            return None
+        return f"_smt_cached_prefix_{name}"
+
     def cpp_runtime_cached_tensor_select_fn(self, name: str, shape: Sequence[int]) -> str | None:
-        if self.backend != "cpp" or len(shape) < 4:
+        if self.backend != "cpp" or len(shape) < 2:
             return None
         return f"_smt_runtime_cached_select_{name}"
 
     def cpp_runtime_cached_tensor_cache_var(self, name: str) -> str:
         return f"_smt_cache_{name}"
+
+    def cpp_flat_index_expr(self, coord_names: Sequence[str], shape: Sequence[int]) -> str:
+        if not coord_names:
+            return "0ULL"
+        expr = f"static_cast<std::size_t>({coord_names[0]})"
+        for idx, dim in enumerate(shape[1:], start=1):
+            expr = f"(({expr}) * {int(dim)}ULL + static_cast<std::size_t>({coord_names[idx]}))"
+        return expr
+
+    def cpp_cached_temp_var(self, name: str) -> str:
+        return f"{name}_cache"
+
+    def cpp_should_cache_temp(self, source_name: str, shape: Sequence[int]) -> bool:
+        if self.backend != "cpp" or not shape:
+            return False
+        return self.name_use_counts.get(source_name, 0) > 1
+
+    def compute_name_use_counts(self, function_node: ast.FunctionDef) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for stmt in function_node.body:
+            nodes: list[ast.AST] = []
+            if isinstance(stmt, ast.Assign):
+                nodes.append(stmt.value)
+            elif isinstance(stmt, ast.Return):
+                nodes.append(stmt.value)
+            for root in nodes:
+                for node in ast.walk(root):
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                        counts[node.id] = counts.get(node.id, 0) + 1
+        return counts
 
     def emit_cpp_runtime_cached_tensor_selects(self) -> None:
         if self.backend != "cpp":
@@ -553,18 +596,16 @@ class LambdaLowerer:
             if cache_fn is None:
                 continue
             param_names = [f"i{idx}" for idx in range(len(shape))]
-            flat_expr = f"static_cast<std::size_t>({param_names[0]})"
-            for idx, dim in enumerate(shape[1:], start=1):
-                flat_expr = f"(({flat_expr}) * {int(dim)}ULL + static_cast<std::size_t>({param_names[idx]}))"
+            flat_expr = self.cpp_flat_index_expr(param_names, shape)
             self.lines.append(
                 f"static inline const SmtString& {cache_fn}({', '.join(f'long long {name_}' for name_ in param_names)}, "
-                "std::pmr::unordered_map<std::size_t, SmtString>& cache) {"
+                "SmtString** cache) {"
             )
             self.lines.append(f"    const std::size_t flat = {flat_expr};")
-            self.lines.append("    auto it = cache.find(flat);")
-            self.lines.append("    if (it != cache.end()) return it->second;")
+            self.lines.append("    if (cache[flat] != nullptr) return *cache[flat];")
             select_args = ", ".join(param_names)
-            self.lines.append(f'    return cache.emplace(flat, _smt_select({cpp_string_literal(name)}, {select_args})).first->second;')
+            self.lines.append(f'    cache[flat] = new SmtString(_smt_select({cpp_string_literal(name)}, {select_args}));')
+            self.lines.append("    return *cache[flat];")
             self.lines.append("}")
 
     def emit_cpp_cached_state_selects(self) -> None:
@@ -580,9 +621,7 @@ class LambdaLowerer:
                 continue
             size = tensor_size(shape)
             param_names = [f"i{idx}" for idx in range(len(shape))]
-            flat_expr = f"static_cast<std::size_t>({param_names[0]})"
-            for idx, dim in enumerate(shape[1:], start=1):
-                flat_expr = f"(({flat_expr}) * {int(dim)}ULL + static_cast<std::size_t>({param_names[idx]}))"
+            flat_expr = self.cpp_flat_index_expr(param_names, shape)
 
             self.lines.append(f"static inline const SmtString& {cache_fn}({', '.join(f'long long {name_}' for name_ in param_names)}) {{")
             self.lines.append("    static const auto* cache = []() {")
@@ -600,6 +639,37 @@ class LambdaLowerer:
             self.lines.append("        return values;")
             self.lines.append("    }();")
             self.lines.append(f"    return (*cache)[{flat_expr}];")
+            self.lines.append("}")
+
+    def emit_cpp_cached_prefix_selects(self) -> None:
+        if self.backend != "cpp":
+            return
+        seen: set[str] = set()
+        entries: list[tuple[str, tuple[int, ...]]] = []
+        for name, value in zip(self.spec.forward_arg_names, self.spec.module.get_inputs()):
+            if isinstance(value, torch.Tensor):
+                entries.append((name, tuple(value.shape)))
+        for name in self.spec.state_names:
+            value = self.spec.state_meta[name]
+            if isinstance(value, torch.Tensor):
+                entries.append((name, tuple(value.shape)))
+        for name, shape in entries:
+            if name in seen:
+                continue
+            seen.add(name)
+            if self.cpp_cached_state_select_fn(name, shape) is not None:
+                continue
+            cache_fn = self.cpp_cached_prefix_select_fn(name, shape)
+            if cache_fn is None:
+                continue
+            self.lines.append(f"static inline const SmtString& {cache_fn}(long long i0) {{")
+            self.lines.append("    static auto** cache = []() {")
+            self.lines.append(f"        return new SmtString*[{int(shape[0])}ULL]();")
+            self.lines.append("    }();")
+            self.lines.append("    const std::size_t flat = static_cast<std::size_t>(i0);")
+            self.lines.append("    if (cache[flat] != nullptr) return *cache[flat];")
+            self.lines.append(f'    cache[flat] = new SmtString(_smt_select({cpp_string_literal(name)}, i0));')
+            self.lines.append("    return *cache[flat];")
             self.lines.append("}")
 
     def emits_cpp(self) -> bool:
@@ -872,6 +942,25 @@ class LambdaLowerer:
             self.lines.append("    result.reserve(total);")
             self.lines.append("    for (std::size_t i = 0; i < count; ++i) result += \"(select \";")
             self.lines.append("    result += name;")
+            self.lines.append("    auto append_idx = [&](const auto& idx) {")
+            self.lines.append("        result += ' ';")
+            self.lines.append("        _smt_append_atom(result, idx);")
+            self.lines.append("        result += ')';")
+            self.lines.append("    };")
+            self.lines.append("    (append_idx(idxs), ...);")
+            self.lines.append("    return result;")
+            self.lines.append("}")
+            self.lines.append("template <typename... Args>")
+            self.lines.append("static inline SmtString _smt_select_from(const SmtString& base, const Args&... idxs) {")
+            self.lines.append("    constexpr std::size_t count = sizeof...(Args);")
+            self.lines.append("    if constexpr (count == 0) return base;")
+            self.lines.append("    std::size_t total = base.size() + count * 9;")
+            self.lines.append("    auto add_idx_size = [&](const auto& idx) { total += _smt_atom_size(idx); };")
+            self.lines.append("    (add_idx_size(idxs), ...);")
+            self.lines.append("    SmtString result;")
+            self.lines.append("    result.reserve(total);")
+            self.lines.append("    for (std::size_t i = 0; i < count; ++i) result += \"(select \";")
+            self.lines.append("    result += base;")
             self.lines.append("    auto append_idx = [&](const auto& idx) {")
             self.lines.append("        result += ' ';")
             self.lines.append("        _smt_append_atom(result, idx);")
@@ -1249,6 +1338,17 @@ class LambdaLowerer:
                 for name in self.spec.state_names
             ):
                 self.lines.append("")
+            self.emit_cpp_cached_prefix_selects()
+            if any(
+                isinstance(value, torch.Tensor)
+                and self.cpp_cached_state_select_fn(name, tuple(value.shape)) is None
+                and self.cpp_cached_prefix_select_fn(name, tuple(value.shape)) is not None
+                for name, value in [
+                    *zip(self.spec.forward_arg_names, self.spec.module.get_inputs()),
+                    *((name, self.spec.state_meta[name]) for name in self.spec.state_names),
+                ]
+            ):
+                self.lines.append("")
             self.lines.append(f"static constexpr long long kOutputSize = {product(self.spec.output_shape)}LL;")
             self.lines.append("static inline bool _flat_coord_in_bounds(long long flat_coord) {")
             self.lines.append("    return flat_coord >= 0 && flat_coord < kOutputSize;")
@@ -1273,9 +1373,8 @@ class LambdaLowerer:
                 if self.cpp_runtime_cached_tensor_select_fn(name, shape) is None:
                     continue
                 cache_var = self.cpp_runtime_cached_tensor_cache_var(name)
-                reserve = min(tensor_size(shape), 4096)
-                self.lines.append(f"    std::pmr::unordered_map<std::size_t, SmtString> {cache_var};")
-                self.lines.append(f"    {cache_var}.reserve({reserve}ULL);")
+                size = tensor_size(shape)
+                self.lines.append(f"    auto** {cache_var} = new SmtString*[{size}ULL]();")
         elif self.backend == "python":
             self.lines.append("import math")
         self.lines.append("")
@@ -1318,7 +1417,20 @@ class LambdaLowerer:
                 if self.backend == "cpp":
                     param_decl = self.cpp_coord_param_decl(value.shape)
                     param_vars = self.coord_vars_for_shape(value.shape, source="c")
-                    self.lines.append(f"    const auto {name} = [&](%s) -> SmtString {{ return %s; }};" % (param_decl, value.render(param_vars)))
+                    if self.cpp_should_cache_temp(target, value.shape):
+                        impl_name = f"{name}_impl"
+                        cache_var = self.cpp_cached_temp_var(name)
+                        size = tensor_size(value.shape)
+                        flat_expr = self.cpp_flat_index_expr(self.cpp_coord_param_names(value.shape), value.shape)
+                        self.lines.append(f"    auto** {cache_var} = new SmtString*[{size}ULL]();")
+                        self.lines.append(f"    const auto {impl_name} = [&](%s) -> SmtString {{ return %s; }};" % (param_decl, value.render(param_vars)))
+                        self.lines.append(f"    const auto {name} = [&](%s) -> const SmtString& {{ " % param_decl
+                                          + f"const std::size_t flat = {flat_expr}; "
+                                          + f"if ({cache_var}[flat] != nullptr) return *{cache_var}[flat]; "
+                                          + f"{cache_var}[flat] = new SmtString({impl_name}({', '.join(self.cpp_coord_param_names(value.shape))})); "
+                                          + f"return *{cache_var}[flat]; }};")
+                    else:
+                        self.lines.append(f"    const auto {name} = [&](%s) -> SmtString {{ return %s; }};" % (param_decl, value.render(param_vars)))
                     ref = ValueRef(shape=value.shape, renderer=lambda coord, name=name: f"{name}({self.coord_expr(coord)})")
                 else:
                     self.lines.append(f"    {name} = lambda coord: {value.render(coord_vars)}")
@@ -2006,8 +2118,13 @@ class LambdaLowerer:
                 return (
                     "([&]() -> SmtString { "
                     f"long long g = {c} / {channels_per_group}; "
-                    f"SmtString m = {mean_for('g')}; "
-                    f"SmtString v = {var_for('g', 'm')}; "
+                    f"static auto** gn_mean_cache = new SmtString*[{input_value.shape[0] * num_groups}ULL](); "
+                    f"static auto** gn_var_cache = new SmtString*[{input_value.shape[0] * num_groups}ULL](); "
+                    f"const std::size_t gn_flat = ((static_cast<std::size_t>({b})) * {num_groups}ULL + static_cast<std::size_t>(g)); "
+                    f"if (gn_mean_cache[gn_flat] == nullptr) gn_mean_cache[gn_flat] = new SmtString({mean_for('g')}); "
+                    f"const SmtString& m = *gn_mean_cache[gn_flat]; "
+                    f"if (gn_var_cache[gn_flat] == nullptr) gn_var_cache[gn_flat] = new SmtString({var_for('g', 'm')}); "
+                    f"const SmtString& v = *gn_var_cache[gn_flat]; "
                     f"return {self.fmt_add(self.fmt_div(self.fmt_mul(weight.render([c]), self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias.render([c]))}; "
                     "}())"
                 )
@@ -2065,8 +2182,13 @@ class LambdaLowerer:
             if self.backend == "cpp":
                 return (
                     "([&]() -> SmtString { "
-                    f"SmtString m = {mean_expr}; "
-                    f"SmtString v = {self.fmt_div(render_nested_cpp_sum(list(spatial), lambda vars_: var_body(vars_, 'm'), 'inv_'), str(count))}; "
+                    f"static auto** in_mean_cache = new SmtString*[{input_value.shape[0] * input_value.shape[1]}ULL](); "
+                    f"static auto** in_var_cache = new SmtString*[{input_value.shape[0] * input_value.shape[1]}ULL](); "
+                    f"const std::size_t in_flat = ((static_cast<std::size_t>({b})) * {input_value.shape[1]}ULL + static_cast<std::size_t>({c})); "
+                    f"if (in_mean_cache[in_flat] == nullptr) in_mean_cache[in_flat] = new SmtString({mean_expr}); "
+                    f"const SmtString& m = *in_mean_cache[in_flat]; "
+                    f"if (in_var_cache[in_flat] == nullptr) in_var_cache[in_flat] = new SmtString({self.fmt_div(render_nested_cpp_sum(list(spatial), lambda vars_: var_body(vars_, 'm'), 'inv_'), str(count))}); "
+                    f"const SmtString& v = *in_var_cache[in_flat]; "
                     f"return {self.fmt_add(self.fmt_div(self.fmt_mul(weight_expr, self.fmt_sub(input_value.render([b, c, *spatial_coord]), 'm')), self.fmt_sqrt(self.fmt_add('v', eps_name))), bias_expr)}; "
                     "}())"
                 )
