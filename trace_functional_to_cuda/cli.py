@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from collections import deque
 import difflib
 import hashlib
 import importlib.util
 import json
+import multiprocessing
 import os
 import queue
 import shutil
@@ -22,6 +24,7 @@ from types import ModuleType
 from typing import Any, Iterable, Sequence
 
 import torch
+from tqdm import tqdm
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -63,6 +66,23 @@ NORMALIZED_NOOP_OPS = {
 
 class TraceFunctionalToCudaError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class BatchTraceTask:
+    relative_model_path: Path
+    model_file: Path
+    input_json: Path
+    output_json: Path
+
+
+@dataclass(frozen=True)
+class ProblemArtifacts:
+    level_name: str
+    problem_id: str
+    spec_json: Path
+    spec_cpp: Path
+    output_cpp: Path
 
 
 @dataclass
@@ -997,6 +1017,234 @@ def trace_functional_model_to_json(
     return output_payload
 
 
+def _iter_batch_model_files(model_root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in model_root.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+
+
+def _match_problem_file(spec_level_dir: Path, problem_id: str, suffix: str) -> Path:
+    matches = sorted(spec_level_dir.glob(f"{problem_id}_*{suffix}"))
+    if not matches:
+        raise TraceFunctionalToCudaError(
+            f"Missing spec file for problem {problem_id} in {spec_level_dir}: expected exactly one {problem_id}_*{suffix}"
+        )
+    if len(matches) != 1:
+        raise TraceFunctionalToCudaError(
+            f"Ambiguous spec file for problem {problem_id} in {spec_level_dir}: found {len(matches)} matches for {problem_id}_*{suffix}"
+        )
+    return matches[0]
+
+
+def _resolve_problem_artifacts(
+    model_root: Path,
+    spec_root: Path,
+    output_root: Path,
+) -> tuple[list[BatchTraceTask], list[ProblemArtifacts]]:
+    tasks: list[BatchTraceTask] = []
+    problems: dict[tuple[str, str], ProblemArtifacts] = {}
+
+    for model_file in _iter_batch_model_files(model_root):
+        relative_model_path = model_file.relative_to(model_root)
+        parts = relative_model_path.parts
+        if len(parts) != 4:
+            raise TraceFunctionalToCudaError(
+                "Batch input files must match <level>/<problem_id>/<correctness>/<solution_id>.py; "
+                f"got {relative_model_path}"
+            )
+        level_name, problem_id, correctness, filename = parts
+        if correctness not in {"correct", "incorrect"}:
+            raise TraceFunctionalToCudaError(
+                "Batch input files must use a correctness directory named 'correct' or 'incorrect'; "
+                f"got {relative_model_path}"
+            )
+        if model_file.suffix != ".py":
+            raise TraceFunctionalToCudaError(f"Batch input file must be a Python file: {relative_model_path}")
+
+        problem_key = (level_name, problem_id)
+        artifacts = problems.get(problem_key)
+        if artifacts is None:
+            spec_level_dir = spec_root / level_name
+            if not spec_level_dir.is_dir():
+                raise TraceFunctionalToCudaError(f"Missing spec level directory: {spec_level_dir}")
+            spec_json = _match_problem_file(spec_level_dir, problem_id, ".json")
+            spec_cpp = _match_problem_file(spec_level_dir, problem_id, ".cpp")
+            output_problem_dir = output_root / level_name / problem_id
+            artifacts = ProblemArtifacts(
+                level_name=level_name,
+                problem_id=problem_id,
+                spec_json=spec_json,
+                spec_cpp=spec_cpp,
+                output_cpp=output_problem_dir / spec_cpp.name,
+            )
+            problems[problem_key] = artifacts
+
+        tasks.append(
+            BatchTraceTask(
+                relative_model_path=relative_model_path,
+                model_file=model_file,
+                input_json=artifacts.spec_json,
+                output_json=(output_root / relative_model_path).with_suffix(".json"),
+            )
+        )
+
+    return tasks, sorted(problems.values(), key=lambda item: (item.level_name, int(item.problem_id)))
+
+
+def _copy_problem_cpp(artifacts: ProblemArtifacts, *, force: bool) -> None:
+    artifacts.output_cpp.parent.mkdir(parents=True, exist_ok=True)
+    if not force and artifacts.output_cpp.exists():
+        return
+    shutil.copy2(artifacts.spec_cpp, artifacts.output_cpp)
+
+
+def _process_batch_trace_task(
+    task: BatchTraceTask,
+    *,
+    device: str,
+    function_name: str,
+    check_determinism: bool,
+    child_timeout_seconds: float,
+    force: bool,
+) -> tuple[Path, str, str | None]:
+    if not force and task.output_json.exists():
+        return task.relative_model_path, "skipped", None
+    try:
+        task.output_json.parent.mkdir(parents=True, exist_ok=True)
+        trace_functional_model_to_json(
+            task.model_file,
+            task.input_json,
+            task.output_json,
+            device=device,
+            function_name=function_name,
+            check_determinism=check_determinism,
+            child_timeout_seconds=child_timeout_seconds,
+        )
+        return task.relative_model_path, "succeeded", None
+    except Exception as exc:
+        return task.relative_model_path, "failed", str(exc)
+
+
+def _start_thread_to_terminate_when_parent_process_dies(ppid: int) -> None:
+    pid = os.getpid()
+
+    def _watch_parent() -> None:
+        while True:
+            try:
+                os.kill(ppid, 0)
+            except OSError:
+                os.kill(pid, 15)
+            time.sleep(1)
+
+    thread = threading.Thread(target=_watch_parent, daemon=True)
+    thread.start()
+
+
+def trace_functional_models_to_json_batch(
+    model_dir: str | Path,
+    spec_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    device: str = "cuda:0",
+    function_name: str = "functional_model",
+    check_determinism: bool = False,
+    child_timeout_seconds: float = DEFAULT_CHILD_TIMEOUT_SECONDS,
+    jobs: int = min(32, os.cpu_count() or 1),
+    force: bool = False,
+) -> dict[str, Any]:
+    model_root = Path(model_dir).resolve()
+    spec_root = Path(spec_dir).resolve()
+    output_root = Path(output_dir).resolve()
+
+    if not model_root.is_dir():
+        raise TraceFunctionalToCudaError(f"Model directory does not exist or is not a directory: {model_root}")
+    if not spec_root.is_dir():
+        raise TraceFunctionalToCudaError(f"Spec directory does not exist or is not a directory: {spec_root}")
+    if jobs < 1:
+        raise TraceFunctionalToCudaError(f"--jobs must be at least 1, got {jobs}")
+
+    output_root.mkdir(parents=True, exist_ok=True)
+    tasks, problems = _resolve_problem_artifacts(model_root, spec_root, output_root)
+    for artifacts in problems:
+        _copy_problem_cpp(artifacts, force=force)
+
+    success_count = 0
+    skipped_count = 0
+    failures: list[tuple[Path, str]] = []
+
+    with tqdm(total=len(tasks), desc="Processing", unit="file", smoothing=0) as progress:
+        if jobs == 1:
+            for task in tasks:
+                relative_path, status, error = _process_batch_trace_task(
+                    task,
+                    device=device,
+                    function_name=function_name,
+                    check_determinism=check_determinism,
+                    child_timeout_seconds=child_timeout_seconds,
+                    force=force,
+                )
+                if status == "succeeded":
+                    success_count += 1
+                elif status == "skipped":
+                    skipped_count += 1
+                else:
+                    failures.append((relative_path, error or "unknown error"))
+                progress.update(1)
+                progress.set_postfix_str(
+                    f"Succeeded: {success_count}, Skipped: {skipped_count}, Failed: {len(failures)}"
+                )
+        else:
+            start_method = "fork" if os.name != "nt" else "spawn"
+            with ProcessPoolExecutor(
+                max_workers=jobs,
+                mp_context=multiprocessing.get_context(start_method),
+                initializer=_start_thread_to_terminate_when_parent_process_dies,
+                initargs=(os.getpid(),),
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        _process_batch_trace_task,
+                        task,
+                        device=device,
+                        function_name=function_name,
+                        check_determinism=check_determinism,
+                        child_timeout_seconds=child_timeout_seconds,
+                        force=force,
+                    ): task
+                    for task in tasks
+                }
+                try:
+                    for future in as_completed(futures):
+                        relative_path, status, error = future.result()
+                        if status == "succeeded":
+                            success_count += 1
+                        elif status == "skipped":
+                            skipped_count += 1
+                        else:
+                            failures.append((relative_path, error or "unknown error"))
+                        progress.update(1)
+                        progress.set_postfix_str(
+                            f"Succeeded: {success_count}, Skipped: {skipped_count}, Failed: {len(failures)}"
+                        )
+                except KeyboardInterrupt:
+                    print("Interrupted, cancelling remaining tasks...")
+                    for future in futures:
+                        future.cancel()
+                    executor.shutdown(wait=False)
+                    raise
+
+    return {
+        "task_count": len(tasks),
+        "success_count": success_count,
+        "skipped_count": skipped_count,
+        "failures": failures,
+        "model_root": model_root,
+        "output_root": output_root,
+    }
+
+
 def _child_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=argparse.SUPPRESS)
     parser.add_argument("--model-file", required=True)
@@ -1007,13 +1255,22 @@ def _child_parser() -> argparse.ArgumentParser:
 
 
 def _public_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Trace a corpus-style functional PyTorch model into a CUDA pipeline JSON entry")
-    parser.add_argument("model_file", help="Path to the Python module containing functional_model and get_functional_inputs")
-    parser.add_argument("input_json", help="Path to the input pipeline JSON")
-    parser.add_argument("output_json", help="Path to write the augmented output JSON")
+    parser = argparse.ArgumentParser(
+        description="Trace a tree of functional PyTorch models into CUDA pipeline JSON entries"
+    )
+    parser.add_argument("model_dir", help="Root directory containing solution files to trace")
+    parser.add_argument("spec_dir", help="Root directory containing per-problem input pipeline JSON and CPP files")
+    parser.add_argument("output_dir", help="Root directory to write mirrored output JSON files into")
     parser.add_argument("--device", default="cuda:0", help="CUDA device to use for tracing")
     parser.add_argument("--function-name", default="functional_model", help="Function to invoke inside the model module")
     parser.add_argument("--check-determinism", action="store_true", help="Run the full trace twice and require identical canonical JSON output")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=min(32, os.cpu_count() or 1),
+        help="Number of worker processes for batch processing",
+    )
+    parser.add_argument("--force", action="store_true", help="Regenerate outputs even when the expected JSON output already exists")
     parser.add_argument(
         "--child-timeout-seconds",
         type=float,
@@ -1040,16 +1297,24 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = _public_parser().parse_args(argv)
     try:
-        trace_functional_model_to_json(
-            args.model_file,
-            args.input_json,
-            args.output_json,
+        summary = trace_functional_models_to_json_batch(
+            args.model_dir,
+            args.spec_dir,
+            args.output_dir,
             device=args.device,
             function_name=args.function_name,
             check_determinism=args.check_determinism,
             child_timeout_seconds=args.child_timeout_seconds,
+            jobs=args.jobs,
+            force=args.force,
         )
     except TraceFunctionalToCudaError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    return 0
+    print(
+        f"Processed {summary['task_count']} Python files from {summary['model_root']} to {summary['output_root']}: "
+        f"{summary['success_count']} succeeded, {summary['skipped_count']} skipped, {len(summary['failures'])} failed."
+    )
+    for relative_path, message in summary["failures"]:
+        print(f"FAILED {relative_path}: {message}")
+    return 0 if not summary["failures"] else 1
