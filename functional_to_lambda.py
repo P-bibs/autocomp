@@ -3,15 +3,57 @@ from __future__ import annotations
 
 import argparse
 import ast
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import importlib.util
 import json
+import multiprocessing
+import os
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 from types import ModuleType
 from typing import Any, Callable, Iterable, Sequence
 import uuid
 
 import torch
+from tqdm import tqdm
+
+_TORCH_EXTENSION_BUILD_RUN_ID = uuid.uuid4().hex
+
+
+def _install_isolated_torch_extension_builds() -> None:
+    try:
+        import torch.utils.cpp_extension as cpp_extension
+    except Exception:
+        return
+    if getattr(cpp_extension.load_inline, "_functional_to_lambda_isolated", False):
+        return
+
+    original_load_inline = cpp_extension.load_inline
+
+    def isolated_load_inline(name: str, *args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("build_directory") is None:
+            # Keep each worker on its own JIT extension path so unrelated imports do
+            # not block each other on a shared lock file in ~/.cache/torch_extensions.
+            build_directory = (
+                Path.home()
+                / ".cache"
+                / "functional_to_lambda_torch_extensions"
+                / _TORCH_EXTENSION_BUILD_RUN_ID
+                / f"pid-{os.getpid()}"
+                / f"thread-{threading.get_ident()}"
+                / name
+            )
+            build_directory.mkdir(parents=True, exist_ok=True)
+            kwargs = dict(kwargs)
+            kwargs["build_directory"] = str(build_directory)
+        return original_load_inline(name, *args, **kwargs)
+
+    isolated_load_inline._functional_to_lambda_isolated = True  # type: ignore[attr-defined]
+    cpp_extension.load_inline = isolated_load_inline
+
+
+_install_isolated_torch_extension_builds()
 
 
 class FunctionalToLambdaError(RuntimeError):
@@ -1868,24 +1910,175 @@ def generate_source(path: str | Path, function_name: str = "value_at", backend: 
     return lowerer.build()
 
 
+def batch_output_path(input_root: Path, input_path: Path, output_root: Path, backend: str) -> Path:
+    relative_path = input_path.relative_to(input_root)
+    suffix = ".cpp" if backend == "cpp" else ".py"
+    return output_root / relative_path.with_suffix(suffix)
+
+
+def iter_input_files(input_root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in input_root.rglob("*.py")
+        if path.is_file() and "__pycache__" not in path.parts
+    )
+
+
+def write_generated_output(
+    input_path: Path,
+    output_path: Path,
+    *,
+    function_name: str,
+    backend: str,
+) -> None:
+    source = generate_source(input_path, function_name=function_name, backend=backend)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if backend == "cpp":
+        spec = load_module_spec(input_path)
+        write_cpp_outputs(spec, source, output_path)
+    else:
+        output_path.write_text(source)
+
+
+def generated_outputs_exist(output_path: Path, backend: str) -> bool:
+    if backend == "cpp":
+        return output_path.exists() and output_path.with_suffix(".json").exists()
+    return output_path.exists()
+
+
+def process_input_file(
+    input_root: Path,
+    output_root: Path,
+    input_path: Path,
+    *,
+    function_name: str,
+    backend: str,
+    force: bool,
+) -> tuple[Path, str, str | None]:
+    relative_path = input_path.relative_to(input_root)
+    output_path = batch_output_path(input_root, input_path, output_root, backend)
+    if not force and generated_outputs_exist(output_path, backend):
+        return relative_path, "skipped", None
+    try:
+        write_generated_output(
+            input_path,
+            output_path,
+            function_name=function_name,
+            backend=backend,
+        )
+        return relative_path, "succeeded", None
+    except Exception as exc:
+        return relative_path, "failed", str(exc)
+
+
+def start_thread_to_terminate_when_parent_process_dies(ppid):
+    pid = os.getpid()
+    import time
+    import threading
+    import signal
+    def f():
+        while True:
+            try:
+                os.kill(ppid, 0)
+            except OSError:
+                os.kill(pid, signal.SIGTERM)
+            time.sleep(1)
+
+    thread = threading.Thread(target=f, daemon=True)
+    thread.start()
+
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate a coordinate-lambda function from a KernelBench functional model")
-    parser.add_argument("input_file", help="Path to the functional model file")
-    parser.add_argument("--output", help="Optional output path for the generated module")
+    parser = argparse.ArgumentParser(description="Generate coordinate-lambda artifacts for a tree of KernelBench functional models")
+    parser.add_argument(
+        "input_dir",
+        nargs="?",
+        default="KernelBench/KernelBenchFunctional",
+        help="Path to the input directory containing functional model files",
+    )
+    parser.add_argument("--output", default="kcheck_specs", help="Output directory root")
     parser.add_argument("--function-name", default="value_at", help="Generated function name")
     parser.add_argument("--backend", choices=["python", "smt", "cpp"], default="python", help="Generated backend")
+    parser.add_argument("--jobs", type=int, default=min(32, os.cpu_count() or 1), help="Number of worker processes for batch processing")
+    parser.add_argument("--force", action="store_true", help="Regenerate outputs even when the expected output files already exist")
     args = parser.parse_args(argv)
 
-    source = generate_source(args.input_file, function_name=args.function_name, backend=args.backend)
-    if args.output:
-        if args.backend == "cpp":
-            spec = load_module_spec(args.input_file)
-            write_cpp_outputs(spec, source, args.output)
+    input_root = Path(args.input_dir)
+    output_root = Path(args.output)
+    if not input_root.is_dir():
+        raise FunctionalToLambdaError(f"Input directory does not exist or is not a directory: {input_root}")
+    if args.jobs < 1:
+        raise FunctionalToLambdaError(f"--jobs must be at least 1, got {args.jobs}")
+
+    output_root.mkdir(parents=True, exist_ok=True)
+    input_files = iter_input_files(input_root)
+
+    success_count = 0
+    skipped_count = 0
+    failures: list[tuple[Path, str]] = []
+
+    with tqdm(total=len(input_files), desc="Processing", unit="file", smoothing=0) as progress:
+        if args.jobs == 1:
+            for input_path in input_files:
+                relative_path, status, error = process_input_file(
+                    input_root,
+                    output_root,
+                    input_path,
+                    function_name=args.function_name,
+                    backend=args.backend,
+                    force=args.force,
+                )
+                if status == "succeeded":
+                    success_count += 1
+                elif status == "skipped":
+                    skipped_count += 1
+                else:
+                    failures.append((relative_path, error))
+                progress.update(1)
+                progress.set_postfix_str(f"Succeeded: {success_count}, Skipped: {skipped_count}, Failed: {len(failures)}")
         else:
-            Path(args.output).write_text(source)
-    else:
-        print(source, end="")
-    return 0
+            start_method = "fork" if os.name != "nt" else "spawn"
+            with ProcessPoolExecutor(
+                max_workers=args.jobs,
+                mp_context=multiprocessing.get_context(start_method),
+                initializer=start_thread_to_terminate_when_parent_process_dies,
+                initargs=(os.getpid(),),
+            ) as executor:
+                try:
+                    futures = {
+                        executor.submit(
+                            process_input_file,
+                            input_root,
+                            output_root,
+                            input_path,
+                            function_name=args.function_name,
+                            backend=args.backend,
+                            force=args.force,
+                        ): input_path
+                        for input_path in input_files
+                    }
+                    for future in as_completed(futures):
+                        relative_path, status, error = future.result()
+                        if status == "succeeded":
+                            success_count += 1
+                        elif status == "skipped":
+                            skipped_count += 1
+                        else:
+                            failures.append((relative_path, error))
+                        progress.update(1)
+                        progress.set_postfix_str(f"Succeeded: {success_count}, Skipped: {skipped_count}, Failed: {len(failures)}")
+                except KeyboardInterrupt:
+                    print("Interrupted, cancelling remaining tasks...")
+                    for future in futures:
+                        future.cancel()
+                    executor.shutdown(wait=False)
+
+    print(
+        f"Processed {len(input_files)} Python files from {input_root} to {output_root}: "
+        f"{success_count} succeeded, {skipped_count} skipped, {len(failures)} failed."
+    )
+    for relative_path, message in failures:
+        print(f"FAILED {relative_path}: {message}")
+    return 0 if not failures else 1
 
 
 if __name__ == "__main__":
